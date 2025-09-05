@@ -1,0 +1,46 @@
+MCTS推理脚本运行摘要
+==================================================
+
+开始时间: 2025-09-05 17:55:05
+结束时间: 2025-09-05 17:56:50
+总用时: 1分44秒
+
+运行参数:
+------------------------------
+dataset_name: math500
+model: /root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct
+case_start: 1
+case_end: 1
+num_iterations: 15
+branch_factor: 3
+branch_factor_init: 4
+rollout_num: 5
+run_mode: async_vllm
+max_depth: 6
+balance_beta: 0.5
+expand_guidance: 
+process_criterions: 
+reward_objectives: 
+
+案例处理详情:
+------------------------------
+
+案例 1:
+  问题: Convert the point $(0,3)$ in rectangular coordinates to polar coordinates.  Enter your answer in the form $(r,\theta),$ where $r > 0$ and $0 \le \theta < 2 \pi.$
+  标准答案: \left( 3, \frac{\pi}{2} \right)
+  开始时间: 2025-09-05 17:55:59
+  结束时间: 2025-09-05 17:56:50
+  用时: 50秒
+  推理路径:
+    1. <step>
+[Core idea]: Convert the rectangular coordinates to polar coordinates using the formulas $r = \sqrt{x^2 + y^2}$ and $\theta = \arctan{\left(\frac{y}{x}\right)}.$
+[Full step]: To convert the point $(0, 3)$ to polar coordinates, we need to find the distance from the origin to the point $(0, 3)$ and the angle between the positive $x$-axis and the line segment connecting the origin to the point. The distance $r$ can be found using the formula $r = \sqrt{x^2 + y^2}$. Since $x = 0$, we have $r = \sqrt{0^2 + 3^2} = \sqrt{9} = 3$. The angle $\theta$ can be found using the formula $\theta = \arctan{\left(\frac{y}{x}\right)}$. However, since $x = 0$, the angle is either $\frac{\pi}{2}$ or $\frac{3\pi}{2}$ depending on the sign of $y$. In this case, since $y = 3 > 0$, we have $\theta = \frac{\pi}{2}$.
+</step>
+    2. <step>
+[Core idea]: Approach the problem graphically by examining the position of the point (0,3) in the polar coordinate system to determine the angle.
+[Full step]: When graphing the point (0,3) in the polar coordinate system, we observe that it lies on the positive y-axis. This means the angle between the positive x-axis and the line segment connecting the origin to the point is a right angle, i.e., 90 degrees. However, since the angle is measured in radians, we convert 90 degrees to radians which is $\frac{\pi}{2}$ radians. Therefore, the polar coordinates of the point (0,3) are $(r, \theta) = (3, \frac{\pi}{2})$.
+
+
+The final answer to the question is \boxed{(3, \frac{\pi}
+</step>
+</think>

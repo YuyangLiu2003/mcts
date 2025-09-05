@@ -1,0 +1,46 @@
+MCTS推理脚本运行摘要
+==================================================
+
+开始时间: 2025-09-05 18:12:16
+结束时间: 2025-09-05 18:14:01
+总用时: 1分44秒
+
+运行参数:
+------------------------------
+dataset_name: math500
+model: /root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct
+case_start: 1
+case_end: 1
+num_iterations: 15
+branch_factor: 3
+branch_factor_init: 4
+rollout_num: 5
+run_mode: async_vllm
+max_depth: 6
+balance_beta: 0.5
+expand_guidance: 
+process_criterions: 
+reward_objectives: 
+
+案例处理详情:
+------------------------------
+
+案例 1:
+  问题: Convert the point $(0,3)$ in rectangular coordinates to polar coordinates.  Enter your answer in the form $(r,\theta),$ where $r > 0$ and $0 \le \theta < 2 \pi.$
+  标准答案: \left( 3, \frac{\pi}{2} \right)
+  开始时间: 2025-09-05 18:13:13
+  结束时间: 2025-09-05 18:14:01
+  用时: 48秒
+  推理路径:
+    1. <step>
+[Core idea]: Convert the rectangular coordinates to polar coordinates using the formulas $r = \sqrt{x^2 + y^2}$ and $\theta = \arctan{\left(\frac{y}{x}\right)}.$
+[Full step]: To convert the point $(0, 3)$ to polar coordinates, we need to find the distance $r$ from the origin to the point and the angle $\theta$ that the line connecting the origin and the point makes with the positive x-axis. The distance $r$ can be found using the formula $r = \sqrt{x^2 + y^2},$ and the angle $\theta$ can be found using the formula $\theta = \arctan{\left(\frac{y}{x}\right)}.$ Since the given point is $(0, 3),$ we have $x = 0$ and $y = 3.$ Substituting these values into the formulas, we get $r = \sqrt{0^2 + 3^2} = \sqrt{9} = 3,$ and $\theta = \arctan{\left(\frac{3}{0}\right)}.$ However, since the point lies on the positive y-axis, $\theta = \frac{\pi}{2}$ because it forms a 90-degree angle with the positive x-axis.
+</step>
+    2. <step>
+[Core idea]: Address the issue of the arctan calculation with the point (0,3) to determine a suitable angle, considering the cases where the denominator is zero.
+[Full step]: Since we have a problem with the arctan function at x = 0 (division by zero), we need to consider the case when x = 0, and y > 0, which corresponds to the point being on the positive y-axis. In this case, the angle θ will be π/2 because the point forms a 90-degree angle with the positive x-axis. This is a special case that needs to be handled separately. The correct polar coordinates are (r, θ) = (3, π/2).
+
+
+The final answer to the question is \boxed{(3, \frac{\pi}{2})}
+</step>
+</think>

@@ -1,0 +1,35 @@
+MCTS推理脚本运行摘要
+==================================================
+
+开始时间: 2025-09-05 17:34:26
+结束时间: 2025-09-05 17:35:27
+总用时: 1分1秒
+
+运行参数:
+------------------------------
+dataset_name: math500
+model: /root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct
+case_start: 1
+case_end: 1
+num_iterations: 15
+branch_factor: 3
+branch_factor_init: 4
+rollout_num: 5
+run_mode: async_vllm
+max_depth: 6
+balance_beta: 0.5
+expand_guidance: 
+process_criterions: 
+reward_objectives: 
+
+案例处理详情:
+------------------------------
+
+案例 1:
+  问题: Convert the point $(0,3)$ in rectangular coordinates to polar coordinates.  Enter your answer in the form $(r,\theta),$ where $r > 0$ and $0 \le \theta < 2 \pi.$
+  标准答案: \left( 3, \frac{\pi}{2} \right)
+  开始时间: 2025-09-05 17:35:18
+  结束时间: 2025-09-05 17:35:27
+  用时: 9秒
+  推理路径:
+    1. Error: unterminated character set at position 10

@@ -1,0 +1,15 @@
+{
+  "case_idx": 9,
+  "dataset_name": "math500",
+  "nodes": {
+    "root": {
+      "state": "What is the distance, in units, between the points $(2, -6)$ and $(-4, 3)$? Express your answer in simplest radical form.",
+      "response": null,
+      "visits": 0,
+      "value": 0.0,
+      "is_final": false,
+      "full_context": "Question: What is the distance, in units, between the points $(2, -6)$ and $(-4, 3)$? Express your answer in simplest radical form.\n\n"
+    }
+  },
+  "rollouts": {}
+}

@@ -1,0 +1,64 @@
+------------------------------hyperparams------------------------------
+
+Hyperparameters:
+==================================================
+dataset_name: math500
+model: /root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct
+case_start: 1
+case_end: 10
+num_iterations: 15
+branch_factor: 3
+branch_factor_init: 4
+rollout_num: 5
+show_runtime: True
+show_runtime_case: True
+verbose: True
+run_mode: async_vllm
+max_depth: 6
+balance_beta: 0.5
+expand_guidance: 
+process_criterions: 
+reward_objectives: 
+pair_signal: True
+process_signal: True
+rollout_signal: True
+==================================================
+
+------------------------------case_info------------------------------
+
+Processing case 5:
+------------------------------question------------------------------
+Question: The results of a cross-country team's training run are graphed below. Which student has the greatest average speed? [asy]
+for ( int i = 1; i <= 7; ++i )
+{
+
+draw((i,0)--(i,6));
+}
+
+for ( int i = 1; i <= 5; ++i )
+{
+
+draw((0,i)--(8,i));
+}
+draw((-0.5,0)--(8,0), linewidth(1));
+draw((0,-0.5)--(0,6), linewidth(1));
+label("$O$", (0,0), SW);
+label(scale(.85)*rotate(90)*"distance", (0, 3), W);
+label(scale(.85)*"time", (4, 0), S);
+dot((1.25, 4.5));
+label(scale(.85)*"Evelyn", (1.25, 4.8), N);
+dot((2.5, 2.2));
+label(scale(.85)*"Briana", (2.5, 2.2), S);
+dot((4.25,5.2));
+label(scale(.85)*"Carla", (4.25, 5.2), SE);
+dot((5.6, 2.8));
+label(scale(.85)*"Debra", (5.6, 2.8), N);
+dot((6.8, 1.4));
+label(scale(.85)*"Angela", (6.8, 1.4), E);
+[/asy]
+------------------------------ground_truth------------------------------
+Ground Truth Answer: \text{Evelyn}
+------------------------------separator------------------------------
+****************************************************************************************************
+------------------------------error------------------------------
+Error processing case 5: EngineCore encountered an issue. See stack trace (above) for the root cause.

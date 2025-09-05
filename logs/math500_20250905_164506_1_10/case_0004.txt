@@ -1,0 +1,37 @@
+------------------------------hyperparams------------------------------
+
+Hyperparameters:
+==================================================
+dataset_name: math500
+model: /root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct
+case_start: 1
+case_end: 10
+num_iterations: 15
+branch_factor: 3
+branch_factor_init: 4
+rollout_num: 5
+show_runtime: True
+show_runtime_case: True
+verbose: True
+run_mode: async_vllm
+max_depth: 6
+balance_beta: 0.5
+expand_guidance: 
+process_criterions: 
+reward_objectives: 
+pair_signal: True
+process_signal: True
+rollout_signal: True
+==================================================
+
+------------------------------case_info------------------------------
+
+Processing case 4:
+------------------------------question------------------------------
+Question: How many positive whole-number divisors does 196 have?
+------------------------------ground_truth------------------------------
+Ground Truth Answer: 9
+------------------------------separator------------------------------
+****************************************************************************************************
+------------------------------error------------------------------
+Error processing case 4: EngineCore encountered an issue. See stack trace (above) for the root cause.

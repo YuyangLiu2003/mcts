@@ -1,0 +1,15 @@
+{
+  "case_idx": 6,
+  "dataset_name": "math500",
+  "nodes": {
+    "root": {
+      "state": "A regular hexagon can be divided into six equilateral triangles. If the perimeter of one of the triangles is 21 inches, what is the perimeter, in inches, of the regular hexagon?",
+      "response": null,
+      "visits": 0,
+      "value": 0.0,
+      "is_final": false,
+      "full_context": "Question: A regular hexagon can be divided into six equilateral triangles. If the perimeter of one of the triangles is 21 inches, what is the perimeter, in inches, of the regular hexagon?\n\n"
+    }
+  },
+  "rollouts": {}
+}

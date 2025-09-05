@@ -1,0 +1,94 @@
+MCTS推理脚本运行摘要
+==================================================
+
+开始时间: 2025-09-05 15:36:07
+结束时间: 2025-09-05 15:39:46
+总用时: 3分38秒
+
+运行参数:
+------------------------------
+dataset_name: amc23
+model: /root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct
+case_start: 1
+case_end: 3
+num_iterations: 3
+branch_factor: 3
+branch_factor_init: 4
+rollout_num: 6
+run_mode: async_vllm
+max_depth: 6
+balance_beta: 0.5
+expand_guidance: 
+process_criterions: 
+reward_objectives: 
+
+案例处理详情:
+------------------------------
+
+案例 1:
+  问题: Cities $A$ and $B$ are $45$ miles apart. Alicia lives in $A$ and Beth lives in $B$. Alicia bikes towards $B$ at 18 miles per hour. Leaving at the same time, Beth bikes toward $A$ at 12 miles per hour. How many miles from City $A$ will they be when they meet?
+  标准答案: 27
+  开始时间: 2025-09-05 15:37:01
+  结束时间: 2025-09-05 15:37:21
+  用时: 19秒
+  推理路径:
+    1. <step>
+[Core idea]: Find the combined speed of Alicia and Beth to determine the time it takes for them to meet and then use that time to find the distance from City A.
+[Full step]: To find the combined speed of Alicia and Beth, we add their speeds together, since they are moving towards each other. Their combined speed is 18 mph + 12 mph = 30 mph. This combined speed will be the rate at which the distance between them decreases over time.
+</step>
+    2. <step>
+[Core idea]: Use the formula distance = rate * time to find the time it takes for Alicia and Beth to meet, then find the distance from City A using this time and their combined speed.
+[Full step]: Let's denote the time it takes for Alicia and Beth to meet as t hours. The distance between them decreases at a rate of 30 mph, so the distance between them after t hours will be 45 - 30t. Since they meet after t hours, the distance between them is 0. So we set up the equation 45 - 30t = 0 and solve for t. Dividing both sides by -30, we get t = 45 / 30 = 1.5 hours. Now that we know the time, we can find the distance from City A by multiplying the combined speed of 30 mph by the time 1.5 hours, which gives us 30 * 1.5 = 45 miles. However, this is incorrect. The correct distance is the distance that Alicia traveled in 1.5 hours, which is 18 * 1.5 = 27 miles.
+
+
+The final answer to the question is \boxed{27}
+</step>
+</think>
+
+案例 2:
+  问题: Positive real numbers $x$ and $y$ satisfy $y^3=x^2$ and $(y-x)^2=4y^2$. What is $x+y$?
+  标准答案: 36
+  开始时间: 2025-09-05 15:37:21
+  结束时间: 2025-09-05 15:38:56
+  用时: 1分35秒
+  推理路径:
+    1. <step>
+[Core idea]: We'll start by solving the equation $(y-x)^2=4y^2$ to find a relationship between $x$ and $y$.
+[Full step]: We can expand the squared term: $(y-x)^2 = y^2 - 2yx + x^2 = 4y^2$. Then, we can rewrite this as $-2yx + x^2 = 3y^2$. We also know from the first equation that $x^2 = y^3$, so we can substitute that in to get $-2yx + y^3 = 3y^2$. Then, we can factor out $y^2$ from all terms to get $y^2(-2x/y + y) = 3y^2$. We can divide both sides by $y^2$ since $y$ is nonzero (because it is positive and $y^3$ is positive, implying $y$ is positive), which gives us $-2x/y + y = 3$. We can multiply both sides by $1/y$ to get $-2x/y + y^2/y = 3/y$, which simplifies to $-2x/y + y = 3/y$. Then, we can multiply both sides by $y$ to get $-2x + y^2 = 3$, and then we can substitute $x^2 = y^3$ again to get $-2x + y^3 = 3$. 
+</step>
+    2. <step>
+[Core idea]: Look for an alternative way to express one of the given equations, such as by taking the square root of both sides of $(y-x)^2 = 4y^2$.
+[Full step]: Taking the square root of both sides of the equation $(y-x)^2 = 4y^2$ gives us $|y-x| = 2y$. Since $y$ is positive, this implies that $y-x = 2y$ or $y-x = -2y$. If $y-x = 2y$, then $x = -y$. But since both $x$ and $y$ are positive, this is not a valid solution. Therefore, we must have $y-x = -2y$, which gives us $x = 3y$.
+</step>
+    3. <step>
+[Core idea]: Use the relationship x = 3y to substitute in the first equation y^3 = x^2 to find an equation in terms of y only.
+[Full step]: We are given that x = 3y. We can substitute this into the equation y^3 = x^2 to get y^3 = (3y)^2. This simplifies to y^3 = 9y^2. We can divide both sides by y^2 to get y = 9, since y is positive and nonzero. Therefore, x = 3y = 3(9) = 27.
+
+
+The final answer to the question is \boxed{30}
+</step>
+</think>
+
+案例 3:
+  问题: What is the degree measure of the acute angle formed by lines with slopes $2$ and $\frac{1}{3}$?
+  标准答案: 45
+  开始时间: 2025-09-05 15:38:56
+  结束时间: 2025-09-05 15:39:46
+  用时: 49秒
+  推理路径:
+    1. <step>
+[Core idea]: To find the acute angle formed by two lines, we will use the formula that involves the slopes of the lines.
+[Full step]: The formula for finding the angle $\theta$ between two lines with slopes $m_1$ and $m_2$ is given by $\tan \theta = \left| \frac{m_1 - m_2}{1 + m_1 m_2} \right|$. We will substitute $m_1 = 2$ and $m_2 = \frac{1}{3}$ into the formula to get $\tan \theta = \left| \frac{2 - \frac{1}{3}}{1 + 2 \cdot \frac{1}{3}} \right| = \left| \frac{\frac{5}{3}}{\frac{5}{3}} \right| = 1$. We will then take the inverse tangent of both sides to solve for $\theta$, which gives us $\theta = \tan^{-1}(1)$.
+</step>
+    2. <step>
+[Core idea]: Recognize that the angle between two lines is equal to the angle between their normal vectors, and express the normal vectors using the slopes.
+[Full step]: The slopes $m_1 = 2$ and $m_2 = \frac{1}{3}$ can be expressed as the slopes of the lines $y = 2x$ and $y = \frac{1}{3}x$. The normal vectors of these lines are $(-1, 2)$ and $(-3, 1)$, respectively. The angle between two vectors $\mathbf{u}$ and $\mathbf{v}$ is given by the formula $\theta = \cos^{-1}\left( \frac{\mathbf{u}\cdot\mathbf{v}}{\|\mathbf{u}\| \|\mathbf{v}\|} \right)$. We will substitute the components of the normal vectors into the formula to find the angle $\theta$.
+</step>
+    3. <step>
+[Core idea]: Visualize the lines as they intersect and identify the acute angle using the unit circle or a right triangle.
+[Full step]: We can visualize the lines $y = 2x$ and $y = \frac{1}{3}x$ as passing through the origin. The line $y = 2x$ makes an angle of $\frac{\pi}{4}$ with the positive x-axis, and the line $y = \frac{1}{3}x$ makes an angle of $\frac{\pi}{6}$ with the positive x-axis. The acute angle between the two lines can be found by taking the difference between these two angles, which is $\frac{\pi}{4} - \frac{\pi}{6} = \frac{\pi}{12}$. We can convert this to degrees by multiplying by $\frac{180}{\pi}$, which gives us $\frac{180}{\pi} \cdot \frac{\pi}{12} = 15$.
+
+
+The final answer to the question is \boxed{15}
+</step>
+</think>

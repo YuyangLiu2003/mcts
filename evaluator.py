@@ -212,7 +212,7 @@ class PairwiseRewardModel:
 
     async def pairwise_evaluate(self, previous_steps: str, new_nodes: List[Any], process_criterions: str, case_idx: int = None) -> List[float]:
         """
-        外部调用的主要方法，执行成对比较评估
+        外部调用的方法，执行成对比较评估
         """
         pairs = self._get_pairs(new_nodes)
         evaluated_pairs = []
@@ -224,51 +224,3 @@ class PairwiseRewardModel:
             evaluated_pairs = await asyncio.gather(*comparison_tasks)
         node_adv_scores = self._get_bradley_terry_score(evaluated_pairs, len(new_nodes))
         return node_adv_scores, evaluated_pairs
-
-    async def singlenode_evaluate(self, previous_steps: str, new_nodes: List[Any], current_node: Any, process_criterions: str, 
-                 return_response: bool = False, case_idx: int = None) -> Any:
-        """
-        执行成对比较评估，返回当前节点的优势分数
-        
-        Args:
-            previous_steps: 之前的推理步骤
-            new_nodes: 所有新生成的节点列表
-            current_node: 当前要评估的节点
-            process_criterions: 过程评价标准
-            return_response: 是否返回完整响应（这里暂时不使用）
-            case_idx: 当前案例的索引
-        Returns:
-            当前节点的优势分数
-        """
-        # 获取所有比较对
-        pairs = self._get_pairs(new_nodes)
-        test_out("pairwise_pairs", f"Generated {len(pairs)} comparison pairs", case_idx, self.dataset_name)
-        
-        # 对每个比较对进行评估 - 使用异步并发执行
-        evaluated_pairs = []
-        if pairs:
-            # 创建所有比较任务
-            comparison_tasks = [
-                self._pair_comparison(previous_steps, pair, process_criterions, case_idx)
-                for pair in pairs
-            ]
-            # 并发执行所有比较
-            evaluated_pairs = await asyncio.gather(*comparison_tasks)
-        
-        # 使用Bradley-Terry模型计算优势分数
-        node_adv_scores = self._get_bradley_terry_score(evaluated_pairs, len(new_nodes))
-        
-        # 找到当前节点在new_nodes中的索引
-        try:
-            current_node_idx = new_nodes.index(current_node)
-            current_adv_score = node_adv_scores[current_node_idx]
-        except ValueError:
-            # 如果当前节点不在new_nodes中，返回0分
-            current_adv_score = 0.0
-            test_out("pairwise_warning", f"Current node not found in new_nodes list", case_idx, self.dataset_name)
-        
-        test_out("pairwise_final_score", f"Current node advantage score: {current_adv_score:.4f}", case_idx, self.dataset_name)
-        
-        if return_response:
-            return current_adv_score, f"Advantage score: {current_adv_score:.4f}"
-        return current_adv_score

@@ -10,7 +10,7 @@ import re
 import os
 
 class use_transformers:
-    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", trust_remote_code=True, local_files_only=True):
+    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", trust_remote_code=True, local_files_only=True, use_stop=False):
         self.model_name = model_name
         self.device = device
         # Suppress tokenizer loading warnings
@@ -29,6 +29,8 @@ class use_transformers:
             local_files_only=local_files_only
         )
         self.model.eval()  # Set the model to evaluation mode
+        # 新增：控制是否使用停止序列/正则
+        self.use_stop = use_stop
 
     def generate(self, prompt, max_new_tokens=500, do_sample=True, temperature=0.7, top_p=0.9, top_k=20, stop_stage=None, skip_special_tokens=True):
         """
@@ -43,7 +45,7 @@ class use_transformers:
         
         # 创建停止条件
         stopping_criteria = None
-        if stop_stage:
+        if stop_stage and self.use_stop:
             # 使用stop_stage自动获取停止条件
             stopping_criteria = get_stopping_criteria(self.tokenizer, stop_stage, prompt_length = prompt_length)
 
@@ -70,16 +72,18 @@ class use_transformers:
         return response
 
 class use_AiHubMix:
-    def __init__(self, model_name, api_key="sk-wcNZCZttk93aGyeB21740aF1F4574f56A3621c1a4c5d4b4e"):
+    def __init__(self, model_name, api_key="sk-wcNZCZttk93aGyeB21740aF1F4574f56A3621c1a4c5d4b4e", use_stop=True):
         self.client = openai.OpenAI(
             api_key=api_key,
             base_url="https://aihubmix.com/v1"
         )
         self.model = model_name
+        # 保持接口一致
+        self.use_stop = use_stop
 
     def generate(self, prompt, max_new_tokens=500, do_sample=True, temperature=0.7, top_p=0.9, top_k=20, stop_stage=None, skip_special_tokens=True):
         """添加generate方法以保持接口一致性"""
-        # ���于API调用，我们仍然使用chat方法，但添加stop_stage支持
+        # 由于API调用，我们仍然使用chat方法，但添加stop_stage支持
         return self.chat(user_prompt=prompt, temperature=temperature)
 
     def chat(self, user_prompt="", system_prompt="", temperature=0.7, top_p=0.9):
@@ -114,7 +118,8 @@ class use_AiHubMix:
             return None
 
 class use_vLLM:
-    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=4096, trust_remote_code=True, tensor_parallel_size=1):
+    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=4096, trust_remote_code=True,
+                 tensor_parallel_size=1, use_stop=False):
         """
         初始化vLLM模型
         
@@ -160,6 +165,8 @@ class use_vLLM:
         
         # 存储常用的停止序列
         self.stop_sequences_cache = {}
+        # 新增：控制是否使用停止序列/正则
+        self.use_stop = use_stop
 
     def __del__(self):
         """
@@ -198,7 +205,7 @@ class use_vLLM:
         
         # 获取停止序列
         stop_sequences = []
-        if stop_stage:
+        if stop_stage and self.use_stop:
             from stop_sequences import get_stop_sequences
             stop_sequences = get_stop_sequences(stop_stage)
             
@@ -222,7 +229,7 @@ class use_vLLM:
         response = outputs[0].outputs[0].text
         
         # 处理正则表达式停止条件
-        if stop_stage:
+        if stop_stage and self.use_stop:
             from stop_sequences import get_regex_patterns
             import re
             
@@ -240,7 +247,7 @@ class use_vLLM:
 
 class use_async_vLLM:
     def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=4096, 
-                 trust_remote_code=True, tensor_parallel_size=None, gpu_memory_utilization=0.9, max_num_seqs=256):
+                 trust_remote_code=True, tensor_parallel_size=None, gpu_memory_utilization=0.9, max_num_seqs=256, use_stop=False):
         """
         初始化异步vLLM模型引擎
         
@@ -285,7 +292,7 @@ class use_async_vLLM:
             max_model_len=max_model_len,
             dtype="float16",
             gpu_memory_utilization=gpu_memory_utilization,
-            max_num_seqs=max_num_seqs
+            max_num_seqs=max_num_seqs,
         )
         
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -295,6 +302,8 @@ class use_async_vLLM:
         
         # 存储常用的停止序列
         self.stop_sequences_cache = {}
+        # 新增：控制是否使用停止序列/正则
+        self.use_stop = use_stop
 
     def __del__(self):
         """
@@ -336,7 +345,7 @@ class use_async_vLLM:
             temperature = 0.0
         
         stop_sequences = []
-        if stop_stage:
+        if stop_stage and self.use_stop:
             from stop_sequences import get_stop_sequences
             stop_sequences = get_stop_sequences(stop_stage)
             self.stop_sequences_cache[stop_stage] = stop_sequences
@@ -346,7 +355,8 @@ class use_async_vLLM:
             n=n,
             temperature=temperature,
             stop=stop_sequences,
-            skip_special_tokens=skip_special_tokens
+            skip_special_tokens=skip_special_tokens,
+            repetition_penalty=1.1
         )
         
         request_id = f"req-{asyncio.get_running_loop().time()}"
@@ -357,7 +367,7 @@ class use_async_vLLM:
         final_output = results[-1]
         texts = [o.text for o in final_output.outputs]
         
-        if stop_stage:
+        if stop_stage and self.use_stop:
             from stop_sequences import get_regex_patterns
             import re
             regex_patterns = get_regex_patterns(stop_stage)

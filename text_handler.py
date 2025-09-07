@@ -257,6 +257,39 @@ class PromptHandler:
         prompt = prompt.replace("[Step B]", stepB)
         
         return prompt
+        
+    def get_best_answer_prompt(self, question: str, reasoning_path: list) -> str:
+        """
+        构建生成最终答案的prompt
+        
+        Args:
+            question: 用户输入的问题
+            reasoning_path: 最佳推理路径
+        Returns:
+            完整的prompt字符串
+        """
+        template = self.templates.get("best_answer")
+        if not template:
+            raise ValueError("Best answer template not found")
+        
+        prefix = template.get("prefix", "")
+        system_prompt = template.get("system_prompt", "")
+        user_prompt = template.get("user_prompt", "")
+        suffix = template.get("suffix", "")
+
+        messages = [{"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}]
+        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = "".join([prefix, prompt, suffix])
+        
+        # 将推理路径转换为字符串
+        reasoning_text = "\n".join(reasoning_path)
+        
+        # 替换占位符
+        prompt = prompt.replace("[user question]", question)
+        prompt = prompt.replace("[reasoning path]", reasoning_text)
+        
+        return prompt
 
 class ResponseHandler:
     def get_expand_step_init(self, response: str) -> List[str]:
@@ -314,7 +347,7 @@ class ResponseHandler:
             if r'\boxed{' in check_terminal_content and r'\boxed{' not in response:
                 # 提取boxed内容
                 import re
-                boxed_match = re.search(r'\\boxed\{(.+)\}', check_terminal_content)
+                boxed_match = re.search(r'\\boxed\{([^}]+)\}', check_terminal_content)
                 if boxed_match:
                     boxed_content = f"\\boxed{{{boxed_match.group(1)}}}"
                     # 在</step>之前添加boxed内容
@@ -404,17 +437,51 @@ class ResponseHandler:
             比较分数（-5到5之间的整数）
         """
         try:
-            # 兼容 [Score]: 5、Score: 5、score：5 等多种格式，并允许小数
-            score_match = re.search(r'\[?\s*score\s*\]?\s*[:：]\s*(-?\d+(?:\.\d+)?)', response, flags=re.IGNORECASE)
+            # 简化匹配逻辑，直接查找关键模式
+            which_match = re.search(r'\[\s*The\s+better\s+step\s*\][:：]?\s*(\w+)', response, re.IGNORECASE)
+            score_match = re.search(r'\[\s*Score\s*\][:：]?\s*([+\-]?\d+(?:\.\d+)?)', response, re.IGNORECASE)
+            
+            # 确定胜者
+            winner = None
+            if which_match:
+                which_text = which_match.group(1).lower()
+                if which_text in ['a', 'step a', 'a is better']:
+                    winner = 'A'
+                elif which_text in ['b', 'step b', 'b is better']:
+                    winner = 'B'
+                elif which_text in ['tie', 'tied', 'equal']:
+                    winner = 'Tie'
+            
+            # 如果没有明确的Which部分，回退到全文搜索
+            if not winner:
+                if re.search(r'(?:step\s+)?a\s+is\s+better', response, re.IGNORECASE):
+                    winner = 'A'
+                elif re.search(r'(?:step\s+)?b\s+is\s+better', response, re.IGNORECASE):
+                    winner = 'B'
+                else:
+                    winner = 'Tie'  # 默认平局
+            
+            # 提取分数
             if score_match:
-                raw = float(score_match.group(1))
-                score = int(round(raw))
-                score = max(-5, min(5, score))
+                raw_score = float(score_match.group(1))
+                base_score = min(5, max(0, int(round(abs(raw_score)))))  # 限制在0-5范围内
+                
+                # 根据胜者确定分数正负
+                if winner == 'A':
+                    return base_score
+                elif winner == 'B':
+                    return -base_score
+                else:
+                    return 0
             else:
-                print(f"Warning: Could not extract score from response: {response}")
-                score = 0  # 默认平局
+                # 没有分数时，根据胜者返回默认分数
+                if winner == 'A':
+                    return 3
+                elif winner == 'B':
+                    return -3
+                else:
+                    return 0
+                    
         except Exception as e:
             print(f"Error parsing pair evaluation response: {e}")
-            score = 0  # 出错时默认平局
-        
-        return score
+            return 0  # 出错时默认平局

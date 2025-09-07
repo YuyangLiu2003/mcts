@@ -97,7 +97,7 @@ class ReasoningNode:
         # 更新坐标
         self.update_coordinates()
 
-    def get_full_reasoning_path(self, response: str = "") -> str:
+    def get_full_reasoning_path(self, new_response: str = "") -> str:
         """
         获取完整的推理路径，包括当前响应
         
@@ -106,10 +106,18 @@ class ReasoningNode:
         Returns:
             完整的推理路径
         """
-        if response:
-            return f"{self.full_context}{response}"  # 如果输入了当前节点response，就拼接起来
+        if new_response:
+            return f"{self.full_context}{new_response}"  # 如果输入了当前节点response，就拼接起来
         else:
             return self.full_context
+
+    def get_previous_steps(self) -> str:
+        """
+        获取除了当前步骤以外之前的步骤
+        """
+        if self.parent is None:
+            return self.full_context
+        return self.parent.full_context
 
     def is_leaf(self):
         # 当节点没有孩子时，认为是叶子节点
@@ -298,71 +306,11 @@ class MCTS_Reasoner:
                 reward = await self._final_simulate(node)
                 self._backpropagate(node, reward)
 
-        # 选择最优路径 - 使用维护的leaf_nodes列表
-        if not self.leaf_nodes:
-            # 如果没有找到任何叶子节点，返回访问次数最多的子节点路径
-            best_child = max(root.children, key=lambda c: c.visits)
-            best_path = best_child.reasoning_path
-            test_out("no_leaf_nodes_found", f"Using best child with most visits: {best_child.coordinates}", self.case_idx, self.dataset_name)
-        else:
-            # 计算答案频率作为置信度得分
-            answer_frequency = self._calculate_answer_frequency()
-            test_out("answer_frequency", f"Answer frequency distribution: {answer_frequency}", self.case_idx, self.dataset_name)
-            
-            # 输出所有答案的置信度排序（从大到小）
-            self._output_answer_confidence_ranking(answer_frequency)
-            
-            # 计算每个叶子节点的加权价值
-            best_leaf = None
-            best_weighted_value = float('-inf')
-            
-            test_out("evaluating_leaf_nodes", f"Found {len(self.leaf_nodes)} leaf nodes to evaluate", self.case_idx, self.dataset_name)
-            
-            for leaf in self.leaf_nodes:
-                leaf_coords = leaf.coordinates
-                test_out("evaluating_leaf", f"Evaluating leaf node: {leaf_coords}", self.case_idx, self.dataset_name)
-                
-                # 计算路径平均价值：reasoning_path上所有节点的value/visits的平均值
-                path_values = []
-                test_out("path_analysis", f"Analyzing reasoning path for leaf {leaf_coords}: {leaf.reasoning_path}", self.case_idx, self.dataset_name)
-                
-                for step in leaf.reasoning_path:
-                    # 找到对应的节点（这里需要根据step找到实际节点）
-                    # 简化处理：使用当前叶子节点的value/visits作为路径价值
-                    if leaf.visits > 0:
-                        step_value = leaf.value / leaf.visits
-                        path_values.append(step_value)
-                        test_out("step_value", f"Step '{step[:50]}...' -> value: {step_value:.6f}", self.case_idx, self.dataset_name)
-                
-                path_mean_value = sum(path_values) / len(path_values) if path_values else 0
-                test_out("path_mean_calculation", f"Leaf {leaf_coords}: path_values={path_values}, path_mean_value={path_mean_value:.6f}", self.case_idx, self.dataset_name)
-                
-                # 计算叶子节点价值：value/visits
-                leaf_value = leaf.value / leaf.visits if leaf.visits > 0 else 0
-                test_out("leaf_value_calculation", f"Leaf {leaf_coords}: visits={leaf.visits}, total_value={leaf.value:.6f}, leaf_value={leaf_value:.6f}", self.case_idx, self.dataset_name)
-                
-                # 计算置信度得分
-                leaf_answer = self._extract_answer_from_response(leaf.response)
-                confidence_score = answer_frequency.get(leaf_answer, 0) / len(self.leaf_nodes) if leaf_answer else 0
-                test_out("confidence_calculation", f"Leaf {leaf_coords}: answer='{leaf_answer}', confidence_score={confidence_score:.6f}", self.case_idx, self.dataset_name)
-                
-                # 加权计算最终价值 - 新公式：weighted_value = balance_beta * path_mean_value + (1 - balance_beta) * (leaf_value + confidence_score)
-                enhanced_leaf_value = leaf_value + confidence_score*10
-                weighted_value = self.balance_beta * path_mean_value + (1 - self.balance_beta) * enhanced_leaf_value
-                test_out("weighted_value_calculation", f"Leaf {leaf_coords}: balance_beta={self.balance_beta}, enhanced_leaf_value={enhanced_leaf_value:.6f} (leaf_value={leaf_value:.6f} + confidence_score={confidence_score:.6f}), weighted_value={weighted_value:.6f}", self.case_idx, self.dataset_name)
-                
-                if weighted_value > best_weighted_value:
-                    best_weighted_value = weighted_value
-                    best_leaf = leaf
-                    test_out("new_best_leaf", f"Leaf {leaf_coords} becomes new best with weighted_value={weighted_value:.6f}", self.case_idx, self.dataset_name)
-                else:
-                    test_out("leaf_comparison", f"Leaf {leaf_coords} weighted_value={weighted_value:.6f} <= current_best={best_weighted_value:.6f}", self.case_idx, self.dataset_name)
-            
-            # 从根节点到最佳叶子节点的完整路径
-            best_path = best_leaf.reasoning_path if best_leaf else []
-            best_leaf_coords = best_leaf.coordinates if best_leaf else "None"
-            test_out("final_path_selection", f"Selected best leaf: {best_leaf_coords} with weighted_value={best_weighted_value:.6f}", self.case_idx, self.dataset_name)
-            test_out("final_path_details", f"Best path coordinates: {best_leaf_coords}, path length: {len(best_path)}", self.case_idx, self.dataset_name)
+        # 选择最优路径 - 调用新的pick_final_answer方法
+        best_path = self.pick_final_answer(root)
+        
+        # 使用最佳推理路径生成最终答案
+        final_answer = await self._output_best_answer(best_path)
 
         end_time = time.time()
         runtime = end_time - start_time
@@ -371,6 +319,8 @@ class MCTS_Reasoner:
             output = f"\n{'*'*60}\nRuntime: {runtime:.2f} seconds\n{'*'*60}"
             test_out("Runtime", output, self.case_idx, self.dataset_name)
             
+        # 在返回的路径中添加最终答案
+        best_path['final_answer'] = final_answer
         return best_path
 
     def _select(self, node: ReasoningNode) -> ReasoningNode:
@@ -421,7 +371,95 @@ class MCTS_Reasoner:
         if selection_trace:
             test_out("selection_path", " -> ".join(selection_trace), self.case_idx, self.dataset_name)
         return node
-    
+
+    def pick_final_answer(self, root: ReasoningNode) -> List[str]:
+        """
+        从所有叶子节点中选择最佳答案路径
+        
+        Args:
+            root: MCTS树的根节点
+        Returns:
+            最佳推理路径
+        """
+        if not self.leaf_nodes:
+            # 如果没有找到任何叶子节点，返回访问次数最多的子节点路径
+            best_child = max(root.children, key=lambda c: c.visits)
+            best_path = best_child.reasoning_path
+            test_out("no_leaf_nodes_found", f"Using best child with most visits: {best_child.coordinates}", self.case_idx, self.dataset_name)
+            return best_path
+        
+        # 计算答案频率作为置信度得分
+        answer_frequency = self._calculate_answer_frequency()
+        test_out("answer_frequency", f"Answer frequency distribution: {answer_frequency}", self.case_idx, self.dataset_name)
+        
+        # 输出所有答案的置信度排序（从大到小）
+        self._output_answer_confidence_ranking(answer_frequency)
+        
+        # 计算每个叶子节点的加权价值
+        best_leaf = None
+        best_weighted_value = float('-inf')
+        
+        test_out("evaluating_leaf_nodes", f"Found {len(self.leaf_nodes)} leaf nodes to evaluate", self.case_idx, self.dataset_name)
+        
+        for leaf in self.leaf_nodes:
+            leaf_coords = leaf.coordinates
+            test_out("evaluating_leaf", f"Evaluating leaf node: {leaf_coords}", self.case_idx, self.dataset_name)
+            
+            # 计算路径平均价值：从根节点到叶子节点路径上所有节点的value/visits的平均值
+            path_values = []
+            test_out("path_analysis", f"Analyzing reasoning path for leaf {leaf_coords}: {leaf.reasoning_path}", self.case_idx, self.dataset_name)
+            
+            # 从叶子节点向上遍历到根节点，收集路径上所有节点的value/visits
+            current_node = leaf
+            path_nodes = []
+            while current_node is not None:
+                path_nodes.append(current_node)
+                current_node = current_node.parent
+            
+            # 从根节点到叶子节点的顺序（reverse path_nodes）
+            path_nodes.reverse()
+            
+            for node in path_nodes:
+                if node.visits > 0:
+                    step_value = node.value / node.visits
+                    path_values.append(step_value)
+                    test_out("step_value", f"Node {node.coordinates}: visits={node.visits}, value={node.value:.6f}, step_value={step_value:.6f}", self.case_idx, self.dataset_name)
+                else:
+                    test_out("step_value", f"Node {node.coordinates}: visits=0, step_value=0", self.case_idx, self.dataset_name)
+                    path_values.append(0.0)
+            
+            path_mean_value = sum(path_values) / len(path_values) if path_values else 0
+            test_out("path_mean_calculation", f"Leaf {leaf_coords}: path_values={path_values}, path_mean_value={path_mean_value:.6f}", self.case_idx, self.dataset_name)
+            
+            # 计算叶子节点价值：value/visits
+            leaf_value = leaf.value / leaf.visits if leaf.visits > 0 else 0
+            test_out("leaf_value_calculation", f"Leaf {leaf_coords}: visits={leaf.visits}, total_value={leaf.value:.6f}, leaf_value={leaf_value:.6f}", self.case_idx, self.dataset_name)
+            
+            # 计算置信度得分
+            leaf_answer = self._extract_answer_from_response(leaf.response)
+            confidence_score = answer_frequency.get(leaf_answer, 0) / len(self.leaf_nodes) * 10 if leaf_answer else 0 #保持量纲一致，都是0-10分
+            test_out("confidence_calculation", f"Leaf {leaf_coords}: answer='{leaf_answer}', confidence_score={confidence_score:.6f}", self.case_idx, self.dataset_name)
+            
+            # 加权计算最终价值 - 新公式：weighted_value = balance_beta * path_mean_value + (1 - balance_beta) * (leaf_value + confidence_score) / 2
+            enhanced_leaf_value = (leaf_value + confidence_score) / 2
+            weighted_value = self.balance_beta * path_mean_value + (1 - self.balance_beta) * enhanced_leaf_value
+            test_out("weighted_value_calculation", f"Leaf {leaf_coords}: balance_beta={self.balance_beta}, enhanced_leaf_value={enhanced_leaf_value:.6f} (leaf_value={leaf_value:.6f} + confidence_score={confidence_score:.6f}), weighted_value={weighted_value:.6f}", self.case_idx, self.dataset_name)
+            
+            if weighted_value > best_weighted_value:
+                best_weighted_value = weighted_value
+                best_leaf = leaf
+                test_out("new_best_leaf", f"Leaf {leaf_coords} becomes new best with weighted_value={weighted_value:.6f}", self.case_idx, self.dataset_name)
+            else:
+                test_out("leaf_comparison", f"Leaf {leaf_coords} weighted_value={weighted_value:.6f} <= current_best={best_weighted_value:.6f}", self.case_idx, self.dataset_name)
+        
+        # 从根节点到最佳叶子节点的完整路径
+        best_path = best_leaf.reasoning_path if best_leaf else []
+        best_leaf_coords = best_leaf.coordinates if best_leaf else "None"
+        test_out("final_path_selection", f"Selected best leaf: {best_leaf_coords} with weighted_value={best_weighted_value:.6f}", self.case_idx, self.dataset_name)
+        test_out("final_path_details", f"Best path coordinates: {best_leaf_coords}, path length: {len(best_path)}", self.case_idx, self.dataset_name)
+        
+        return best_path
+
     def _extract_answer_from_response(self, response: str) -> str:
         """从响应中提取最终答案"""
         import re
@@ -553,6 +591,33 @@ class MCTS_Reasoner:
         }
         self.save_tree_log()
         return new_node
+        
+    async def _output_best_answer(self, best_path: dict) -> str:
+        """
+        使用最佳推理路径生成最终答案
+        
+        Args:
+            best_path: 包含最佳推理路径的字典
+        Returns:
+            生成的最终答案字符串
+        """
+        # 获取最佳路径中的推理步骤
+        reasoning_path = best_path.get('reasoning_path', [])
+        question = self.question
+        
+        # 使用prompt_handler获取best_answer模板
+        prompt = self.prompt_handler.get_best_answer_prompt(question, reasoning_path)
+        test_out("best_answer_prompt", prompt, self.case_idx, self.dataset_name)
+        
+        # 调用LLM生成最终答案
+        final_answer_response = await self.llm_client.generate(
+            prompt, 
+            stop_stage='best_answer', 
+            skip_special_tokens=False
+        )
+        test_out("final_answer_response", final_answer_response, self.case_idx, self.dataset_name)
+        
+        return final_answer_response
         
     async def _async_simulate(self, new_nodes: List[ReasoningNode], pair_signal: bool = True, 
               process_signal: bool = True, rollout_signal: bool = True) -> List[float]:
@@ -719,9 +784,9 @@ class MCTS_Reasoner:
                 test_out("process_score", f"{log['score']:.6f}", self.case_idx, self.dataset_name)
             
             for log in rollout_logs:
-                test_out("rollout_prompt", log['prompt'], self.case_idx, self.dataset_name)
-                test_out("rollout_response", log['response'], self.case_idx, self.dataset_name)
-                test_out("rollout_score", f"rollout_{log['rollout_idx']}: {log['score']:.6f}", self.case_idx, self.dataset_name)
+                test_out("rollout_reward_prompt", log['prompt'], self.case_idx, self.dataset_name)
+                test_out("rollout_reward_response", log['response'], self.case_idx, self.dataset_name)
+                test_out("rollout_reward_score", f"rollout_{log['rollout_idx']}: {log['score']:.6f}", self.case_idx, self.dataset_name)
             
             for log in pairwise_logs:
                 test_out("pairwise_prompt", log['prompt'], self.case_idx, self.dataset_name)
@@ -737,25 +802,28 @@ class MCTS_Reasoner:
             compared_reward = node_rewards[coords]['compared_reward']
             
             # 加权计算最终奖励
-            if rollout_signal and (process_signal or pair_signal):
-                # 新的公式：final_reward = balance_beta * (process_reward + compared_reward) + (1 - balance_beta) * rollout_reward
-                process_compared_sum = 0.0
-                if process_signal:
-                    process_compared_sum += process_reward
-                if pair_signal:
-                    process_compared_sum += compared_reward
+            # 计算 process 和 compared 部分的平均值（当两者都存在时除以2）
+            process_compared_count = 0
+            if process_signal:
+                process_compared_count += 1
+            if pair_signal:
+                process_compared_count += 1
                 
-                final_reward = self.balance_beta * process_compared_sum + (1 - self.balance_beta) * rollout_reward
+            if process_compared_count > 0:
+                process_compared_avg = (process_reward + compared_reward) / process_compared_count
+            else:
+                process_compared_avg = 0.0
+            
+            # 计算最终奖励
+            if rollout_signal and (process_signal or pair_signal):
+                # 使用加权公式
+                final_reward = self.balance_beta * process_compared_avg + (1 - self.balance_beta) * rollout_reward
             elif rollout_signal:
-                # 只有rollout信号
+                # 只有 rollout 信号
                 final_reward = rollout_reward
             elif process_signal or pair_signal:
-                # 只有process和/或pair信号
-                final_reward = 0.0
-                if process_signal:
-                    final_reward += process_reward
-                if pair_signal:
-                    final_reward += compared_reward
+                # 只有 process 和/或 pair 信号
+                final_reward = process_reward + compared_reward
             else:
                 # 所有信号都关闭
                 final_reward = 0.0
@@ -834,7 +902,7 @@ class MCTS_Reasoner:
             异步执行pairwise评估
         """
         compared_rewards, pair_details = await self.pairwise_reward_model.pairwise_evaluate(
-            new_nodes[0].full_context,
+            new_nodes[0].get_previous_steps(),
             new_nodes,
             self.process_criterions,
             self.case_idx
@@ -930,7 +998,7 @@ class MCTS_Reasoner:
         """
         # 直接使用当前节点的推理路径进行评估
         full_reasoning_path = node.get_full_reasoning_path()
-        
+
         # 直接评估终止节点，不需要rollout
         final_reward, reward_prompt, reward_response = await self.reward_model.evaluate(
             full_reasoning_path, 
@@ -939,23 +1007,22 @@ class MCTS_Reasoner:
             self.case_idx
         )
         # 终止节点：统一在此输出 prompt/response/score
-        test_out("final_prompt", reward_prompt, self.case_idx, self.dataset_name)
-        test_out("final_response", reward_response, self.case_idx, self.dataset_name)
-        test_out("final_score", f"{final_reward:.6f}", self.case_idx, self.dataset_name)
+        test_out("terminal_reward_prompt", reward_prompt, self.case_idx, self.dataset_name)
+        test_out("terminal_reward_response", reward_response, self.case_idx, self.dataset_name)
+        test_out("terminal_reward", f"{final_reward:.6f}", self.case_idx, self.dataset_name)
         
         # 记录终止节点评估信息到日志
         final_key = f"{node.coordinates}_final_evaluation"
         self.tree_log["final_evaluations"] = self.tree_log.get("final_evaluations", {})
         self.tree_log["final_evaluations"][final_key] = {
             "full_reasoning_path": full_reasoning_path,
-            "final_reward": final_reward,
+            "terminal_reward": final_reward,
             "evaluation_prompt": reward_prompt,
             "evaluation_response": reward_response
         }
         self.save_tree_log()
         
         return final_reward
-
 
     def _backpropagate(self, node: ReasoningNode, reward: float):
         """反向传播更新节点统计信息"""
@@ -975,14 +1042,15 @@ class MCTS_Reasoner:
         os.makedirs(log_dir, exist_ok=True)
         
         # 构建文件名，每个case只使用一个文件
-        filename = os.path.join(log_dir, f"case_{self.case_idx:04d}.json")
+        filename = os.path.join(log_dir, f"tree_log_{self.dataset_name}_case_{self.case_idx:04d}.json")
         
         # 保存当前树的状态
         tree_data = {
             "case_idx": self.case_idx,
             "dataset_name": self.dataset_name,
             "nodes": self.tree_log["nodes"],
-            "rollouts": self.tree_log["rollouts"]
+            "rollouts": self.tree_log["rollouts"],
+            "final_evaluations": self.tree_log.get("final_evaluations", {})  # 新增：保存终止节点评估信息
         }
         
         # 保存到文件
@@ -1038,29 +1106,17 @@ class MCTS_Reasoner:
 
 async def main():
     global args
-    
-    # 记录脚本开始时间
-    script_start_time = time.time()
-    script_start_datetime = time.strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 初始化summary记录
-    summary_data = {
-        "start_time": script_start_datetime,
-        "start_timestamp": script_start_time,
-        "cases": [],
-        "parameters": {}
-    }
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name", type=str, default="amc23", help="Name of the dataset") 
     parser.add_argument("--model", type=str, default="../llama3/models/Meta-Llama-3.1-8B-Instruct", 
                        help="模型名称或路径。对于aihub模式，使用模型名称（如qwen-max）；对于transformer和vllm模式，使用模型路径")
     parser.add_argument("--case_start", type=int, default=1, help="Start index of cases")
-    parser.add_argument("--case_end", type=int, default=1, help="End index of cases")
+    parser.add_argument("--case_end", type=int, default=40, help="End index of cases")
     parser.add_argument("--num_iterations", type=int, default=15, help="Number of MCTS iterations")
     parser.add_argument("--branch_factor", type=int, default=3, 
                        help="Branch factor for MCTS expansion")
-    parser.add_argument("--branch_factor_init", type=int, default=4,
+    parser.add_argument("--branch_factor_init", type=int, default=3,
                        help="Branch factor for initial step generation")
     parser.add_argument("--rollout_num", type=int, default=3, help="Number of rollouts")
     parser.add_argument("--show_runtime", action="store_true", default=True, help="是否显示运行时间")
@@ -1080,28 +1136,16 @@ async def main():
                        help="过程评价标准（如果为空则从search_guide.json读取）")
     parser.add_argument("--reward_objectives", type=str, default="",
                        help="奖励目标（如果为空则从search_guide.json读取）")
+    parser.add_argument("--pair_signal", type=bool, default=True,
+                       help="是否打开对比奖励信号")
+    parser.add_argument("--process_signal", type=bool, default=False,
+                       help="是否打开过程评估信号")
+    parser.add_argument("--rollout_signal", type=bool, default=True,
+                       help="是否打开rollout模拟评估信号")
     args = parser.parse_args()
     
     # 设置全局args引用
     set_global_args(args)
-    
-    # 记录运行参数
-    summary_data["parameters"] = {
-        "dataset_name": args.dataset_name,
-        "model": args.model,
-        "case_start": args.case_start,
-        "case_end": args.case_end,
-        "num_iterations": args.num_iterations,
-        "branch_factor": args.branch_factor,
-        "branch_factor_init": args.branch_factor_init,
-        "rollout_num": args.rollout_num,
-        "run_mode": args.run_mode,
-        "max_depth": args.max_depth,
-        "balance_beta": args.balance_beta,
-        "expand_guidance": args.expand_guidance,
-        "process_criterions": args.process_criterions,
-        "reward_objectives": args.reward_objectives
-    }
     
     # 统计模型加载时间
     model_load_start = time.time()
@@ -1174,9 +1218,9 @@ async def main():
             "expand_guidance": args.expand_guidance,
             "process_criterions": args.process_criterions,
             "reward_objectives": args.reward_objectives,
-            "pair_signal": True,
-            "process_signal": True,
-            "rollout_signal": True
+            "pair_signal": args.pair_signal,
+            "process_signal": args.process_signal,
+            "rollout_signal": args.rollout_signal
         }
         
         # 构建超参数输出字符串
@@ -1212,9 +1256,9 @@ async def main():
             process_criterions=args.process_criterions,
             reward_objectives=args.reward_objectives,
             balance_beta=args.balance_beta,
-            pair_signal=True,
-            process_signal=True,
-            rollout_signal=True
+            pair_signal=args.pair_signal,
+            process_signal=args.process_signal,
+            rollout_signal=args.rollout_signal
         )
         
         try:
@@ -1229,41 +1273,12 @@ async def main():
                 test_out("reasoning_step", f"- {step}", case_idx + 1, args.dataset_name)
             
             reasoner.save_tree_log()
-            
-            # 记录案例信息到summary
-            case_end_time = time.time()
-            case_duration = case_end_time - case_start_time
-            
-            case_info = {
-                "case_id": case_idx + 1,
-                "question": case['question'],
-                "ground_truth": case['answer'],
-                "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_start_time)),
-                "end_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_end_time)),
-                "duration_seconds": case_duration,
-                "reasoning_path": reasoning_path
-            }
-            summary_data["cases"].append(case_info)
                 
         except Exception as e:
             test_out("error", f"Error processing case {case_idx + 1}: {str(e)}", case_idx + 1, args.dataset_name)
-            
-            # 即使出错也记录案例信息
-            case_end_time = time.time()
-            case_duration = case_end_time - case_start_time
-            
-            case_info = {
-                "case_id": case_idx + 1,
-                "question": case['question'],
-                "ground_truth": case['answer'],
-                "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_start_time)),
-                "end_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_end_time)),
-                "duration_seconds": case_duration,
-                "reasoning_path": [f"Error: {str(e)}"]
-            }
-            summary_data["cases"].append(case_info)
             continue
         
+        case_end_time = time.time()  # 记录case结束时间
         if args.show_runtime_case:
             print(f"Case {case_idx + 1} processed in {case_end_time - case_start_time:.2f} seconds.")
         
@@ -1272,71 +1287,12 @@ async def main():
     
     # 关闭进度条
     pbar.close()
-    
-    # 记录脚本结束时间并生成summary
-    script_end_time = time.time()
-    script_end_datetime = time.strftime("%Y-%m-%d %H:%M:%S")
-    total_duration = script_end_time - script_start_time
-    
-    # 格式化总用时
-    hours = int(total_duration // 3600)
-    minutes = int((total_duration % 3600) // 60)
-    seconds = int(total_duration % 60)
-    
-    if hours > 0:
-        duration_str = f"{hours}时{minutes}分{seconds}秒"
-    else:
-        duration_str = f"{minutes}分{seconds}秒"
-    
-    # 生成summary内容
-    summary_content = f"""MCTS推理脚本运行摘要
-{'='*50}
-
-开始时间: {script_start_datetime}
-结束时间: {script_end_datetime}
-总用时: {duration_str}
-
-运行参数:
-{'-'*30}
-"""
-    
-    for key, value in summary_data["parameters"].items():
-        summary_content += f"{key}: {value}\n"
-    
-    summary_content += f"\n案例处理详情:\n{'-'*30}\n"
-    
-    for case_info in summary_data["cases"]:
-        case_duration = case_info["duration_seconds"]
-        case_minutes = int(case_duration // 60)
-        case_seconds = int(case_duration % 60)
-        case_duration_str = f"{case_minutes}分{case_seconds}秒" if case_minutes > 0 else f"{case_seconds}秒"
-        
-        summary_content += f"\n案例 {case_info['case_id']}:\n"
-        summary_content += f"  问题: {case_info['question']}\n"
-        summary_content += f"  标准答案: {case_info['ground_truth']}\n"
-        summary_content += f"  开始时间: {case_info['start_time']}\n"
-        summary_content += f"  结束时间: {case_info['end_time']}\n"
-        summary_content += f"  用时: {case_duration_str}\n"
-        summary_content += f"  推理路径:\n"
-        for i, step in enumerate(case_info['reasoning_path'], 1):
-            summary_content += f"    {i}. {step}\n"
-    
-    # 保存summary.txt文件到logs目录
-    log_dir = os.path.join("logs", f"{args.dataset_name}_{timestamp}_{args.case_start}_{args.case_end}")
-    os.makedirs(log_dir, exist_ok=True)
-    summary_file_path = os.path.join(log_dir, "summary.txt")
-    try:
-        with open(summary_file_path, 'w', encoding='utf-8') as f:
-            f.write(summary_content)
-        print(f"\n摘要已保存到: {summary_file_path}")
-    except Exception as e:
-        print(f"\n保存摘要文件时出错: {str(e)}")
 
 def run_main():
     """同步包装器函数，用于运行异步主函数"""
     asyncio.run(main())
 
 if __name__ == "__main__":
-    # 限制只使用显卡0
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    # 限制只使用显卡x
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     run_main()

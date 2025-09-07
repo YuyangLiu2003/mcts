@@ -1,22 +1,26 @@
 #!/bin/bash
 
 # 这个脚本用于运行MCTS_reasoning.py，实现基于蒙特卡洛树搜索的推理
-
+# 指定显卡
+export CUDA_VISIBLE_DEVICES=0
 # 设置默认参数
-DATASET="math500"          # 数据集名称，可选：amc23, GSM8K, aime2024等
-MODEL="/root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct"  # 模型路径或名称
+DATASET="open_questions"          # 数据集名称，可选：amc23, GSM8K, aime2024等
+MODEL="../llama3/models/Qwen2.5-7B-Instruct"  # 模型路径或名称
 CASE_START=1           # 起始案例索引
-CASE_END=1            # 结束案例索引
+CASE_END=2            # 结束案例索引
 ITERATIONS=15           # MCTS迭代次数
+BRANCH_FACTOR_INIT=3    # 初始步骤生成的分支因子
 BRANCH_FACTOR=3         # MCTS扩展的分支因子
-BRANCH_FACTOR_INIT=4    # 初始步骤生成的分支因子
-ROLLOUT_NUM=5           # 展开次数
-MAX_DEPTH=6             # MCTS树的最大深度
-BALANCE_BETA=0.5        # 过程奖励和rollout奖励的加权系数 (0-1)
+ROLLOUT_NUM=4           # 展开次数
+MAX_DEPTH=20            # MCTS树的最大深度
+BALANCE_BETA=0.65       # 过程奖励和rollout奖励的加权系数 (0-1)
 EXPAND_GUIDANCE=""      # 扩展指导（如果为空则从search_guide.json读取）
 PROCESS_CRITERIONS=""   # 过程评价标准（如果为空则从search_guide.json读取）
 REWARD_OBJECTIVES=""    # 奖励目标（如果为空则从search_guide.json读取）
-RUN_MODE="async_vllm"  # 运行模式：aihub, transformer, vllm, debug, async_vllm
+RUN_MODE="async_vllm"   # 运行模式：aihub, transformer, vllm, async_vllm, debug
+PAIR_SIGNAL=true        # 是否打开对比奖励信号
+PROCESS_SIGNAL=true    # 是否打开过程评估信号
+ROLLOUT_SIGNAL=true     # 是否打开rollout模拟评估信号
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -77,6 +81,18 @@ while [[ $# -gt 0 ]]; do
       RUN_MODE="$2"
       shift 2
       ;;
+    --pair_signal)
+      PAIR_SIGNAL="$2"
+      shift 2
+      ;;
+    --process_signal)
+      PROCESS_SIGNAL="$2"
+      shift 2
+      ;;
+    --rollout_signal)
+      ROLLOUT_SIGNAL="$2"
+      shift 2
+      ;;
     --help)
       echo "用法: $0 [选项]"
       echo "选项:"
@@ -93,7 +109,10 @@ while [[ $# -gt 0 ]]; do
       echo "  --expand_guidance STR        扩展指导 (默认: 从search_guide.json读取)"
       echo "  --process_criterions STR     过程评价标准 (默认: 从search_guide.json读取)"
       echo "  --reward_objectives STR      奖励目标 (默认: 从search_guide.json读取)"
-      echo "  --run_mode MODE              运行模式: aihub, transformer, vllm, debug (默认: transformer)"
+      echo "  --run_mode MODE              运行模式: aihub, transformer, vllm, async_vllm, debug (默认: async_vllm)"
+      echo "  --pair_signal BOOL           是否打开对比奖励信号 (默认: true)"
+      echo "  --process_signal BOOL        是否打开过程评估信号 (默认: false)"
+      echo "  --rollout_signal BOOL        是否打开rollout模拟评估信号 (默认: true)"
       echo "  --help                       显示此帮助信息"
       exit 0
       ;;
@@ -120,16 +139,19 @@ echo "平衡系数: $BALANCE_BETA"
 [[ -n "$PROCESS_CRITERIONS" ]] && echo "过程评价标准: $PROCESS_CRITERIONS" || echo "过程评价标准: 从search_guide.json读取"
 [[ -n "$REWARD_OBJECTIVES" ]] && echo "奖励目标: $REWARD_OBJECTIVES" || echo "奖励目标: 从search_guide.json读取"
 echo "运行模式: $RUN_MODE"
+echo "对比奖励信号: $PAIR_SIGNAL"
+echo "过程评估信号: $PROCESS_SIGNAL"
+echo "rollout模拟评估信号: $ROLLOUT_SIGNAL"
 echo ""
 
 # 设置数据集目录的绝对路径
-DATASET_DIR="/root/MCTS_Async/datasets"
+DATASET_DIR="/root/data1/hesaikenew/data/ted_LLM/MCTS_Async/datasets"
 
 # 运行Python脚本
 
 export VLLM_LOGGING_LEVEL=error
 
-cd /root/MCTS_Async && python MCTS_reasoning.py \
+cd /root/data1/hesaikenew/data/ted_LLM/MCTS_Async && python MCTS_reasoning.py \
   --dataset_name "$DATASET" \
   --model "$MODEL" \
   --case_start "$CASE_START" \
@@ -144,3 +166,6 @@ cd /root/MCTS_Async && python MCTS_reasoning.py \
   ${PROCESS_CRITERIONS:+--process_criterions "$PROCESS_CRITERIONS"} \
   ${REWARD_OBJECTIVES:+--reward_objectives "$REWARD_OBJECTIVES"} \
   --run_mode "$RUN_MODE" \
+  --pair_signal "$PAIR_SIGNAL" \
+  --process_signal "$PROCESS_SIGNAL" \
+  --rollout_signal "$ROLLOUT_SIGNAL" \

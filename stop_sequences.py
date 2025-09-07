@@ -179,6 +179,9 @@ def get_regex_patterns(stage: str) -> list:
     Returns:
         list: 该阶段使用的正则表达式模式列表
     """
+    # 新增：支持空/none阶段，直接返回空列表
+    if not stage or stage == 'none' or stage == '':
+        return []
     stage_regex = {
         'initial': [],
         'expand': [
@@ -186,8 +189,6 @@ def get_regex_patterns(stage: str) -> list:
         ],
         'rollout': [
             r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}',
-            #r'\\\\boxed\{[^}]*\}',  # 匹配 \boxed{xxx} 格式
-            #r'\$\\\\boxed\{[^}]*\}\$',  # 匹配 $\boxed{xxx}$ 格式
         ],
         'reward': [],
         'process_evaluation': [],
@@ -197,8 +198,6 @@ def get_regex_patterns(stage: str) -> list:
             r'\$\\\\boxed\{[^}]*\}\$',  # 匹配 $\boxed{xxx}$ 格式
         ],
         'pair_evaluation': [
-            #r'\[Score\]:\s*-?\d+',  # 匹配 [Score]: X 格式
-            #r'</comparison>',        # 匹配比较结果结束标记
         ],
     }
     
@@ -212,10 +211,14 @@ def get_stop_sequences(stage: str) -> list:
         stage: MCTS的阶段名称，可选值：
                'initial', 'expand', 'rollout', 'reward', 'process_evaluation', 
                'diverse_ideas', 'direct_reasoning', 'pair_evaluation'
-               
+               或空/none代表不使用停止序列
+                
     Returns:
         list: 该阶段使用的停止序列列表
     """
+    # 新增：支持空/none阶段，直接返回空列表
+    if not stage or stage == 'none' or stage == '':
+        return []
     stage_stops = {
         'initial': INITIAL_STEP_STOPS,
         'expand': EXPAND_STEP_STOPS,

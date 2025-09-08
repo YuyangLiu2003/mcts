@@ -8,13 +8,13 @@
   "diverse_ideas": {
     "prefix": "[previous steps]\n",
     "system_prompt": "",
-    "user_prompt": "Given the context above, provide [num_ideas] distinct andc diverse core ideas for the next reasoning step. Make sure these ideas explore different approaches or directions. [expand guidance] Note that we only need concise core ideas without full steps. Format each idea as [1]: idea1, [2]: idea2, etc.</ideas>\n Be concise but clear. The ideas must be marked with <ideas></ideas> at the beginning and end.",
+    "user_prompt": "Given the context above, provide [num_ideas] distinct andc diverse core ideas for the next reasoning step. Make sure these ideas explore different approaches or directions. [idea guidance] Note that we only need concise core ideas without full steps. Format each idea as [1]: idea1, [2]: idea2, etc.</ideas>\n Be concise but clear. The ideas must be marked with <ideas></ideas> at the beginning and end.",
     "suffix": "Here are [num_ideas] distinct approaches for the next step:\n<ideas>\n"
   },
   "idea_expand": {
     "prefix": "[previous steps]\n",
     "system_prompt": "You must output the following three sections in order:\n1. [Core idea] - The core concept or key insight for this step\n2. [Full step] - The complete implementation details\n3. [Check terminal] - Terminal check result (output format: 'The final answer to the question is \\boxed{answer}' or 'Not a terminal node yet.')\n",
-    "user_prompt": "Follow the existing steps and provide the core idea and full content of the next step (one step only). First, generate the complete [Full step] content. Then, output [Check terminal]. If a clear answer is found, strictly output only 'The final answer to the question is \\boxed{answer}' without any additional information or content. If the final answer has not been reached yet, output 'Not a terminal node yet.' The step must be marked with <step></step> at the beginning and end.",
+    "user_prompt": "Follow the existing steps and provide the core idea and full content of the next step (one step only). [expand guidance] First, generate the complete [Full step] content. Then, output [Check terminal]. If a clear answer is found, strictly output only 'The final answer to the question is \\boxed{answer}' without any additional information or content. If the final answer has not been reached yet, output 'Not a terminal node yet.' The step must be marked with <step></step> at the beginning and end.",
     "suffix": "The next step:\n\n<step>\n[Core idea]: [core instruction]\n[Full step]:"
   },
   "fast_rollout": {
@@ -38,13 +38,13 @@
   "pair_evaluation":{
     "prefix": "[previous steps]\n",
     "system_prompt": "",
-    "user_prompt": "Please compare the quality of Step A and Step B based on the process criterions ([process criterions]), first conduct an in-depth analysis of their quality differences, and then evaluate which is better(A, B, or Tied), give a Score that reflects how much better (0 means tied, 5 means much better). Strictly provide your comparison result in the following format:\n<comparison>\n[Analysis]: Compare and analyze the performance of Step A and Step B in meeting the process criterions respectively, focus on pointing out the advantages and disadvantages of Step A relative to Step B.\n[The better step]: A or B or Tied\n[Score]: X (where X is an integer from 0 to 5)\n</comparison>\nThe Step A is: [Step A]\n\nThe Step B is: [Step B]\n\n",
+    "user_prompt": "Please compare the quality of Step A and Step B based on the process criterions ([pairwise criterions]), first conduct an in-depth analysis of their quality differences, and then evaluate which is better(A, B, or Tied), give a Score that reflects how much better (0 means tied, 5 means much better). Strictly provide your comparison result in the following format:\n<comparison>\n[Analysis]: Compare and analyze the performance of Step A and Step B in meeting the process criterions respectively, focus on pointing out the advantages and disadvantages of Step A relative to Step B.\n[The better step]: A or B or Tied\n[Score]: X (where X is an integer from 0 to 5)\n</comparison>\nThe Step A is: [Step A]\n\nThe Step B is: [Step B]\n\n",
     "suffix": "<comparison>\n[Analysis]:"
   },
   "best_answer":{
     "prefix": "",
     "system_prompt": "",
-    "user_prompt": "[best question]\n\n\n",
-    "suffix": "<think>\n[best solution]\n</think>\nThe final answer is: "
+    "user_prompt": "[best solution]\nPlease provide your final answer based on the complete solution outlined above. If the above ideas haven't yet led to a final solution, please provide your final answer directly.\n[answer restrictions]Please strictly follow the formatting requirements and place your final answer in the \\boxed{Final Answer}.",
+    "suffix": "The final answer is: \\boxed{"
   }
 }

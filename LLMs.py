@@ -203,22 +203,12 @@ class use_vLLM:
             top_p = 1.0
             top_k = -1
         
-        # 获取停止序列
-        stop_sequences = []
-        if stop_stage and self.use_stop:
-            from stop_sequences import get_stop_sequences
-            stop_sequences = get_stop_sequences(stop_stage)
-            
-            # 缓存停止序列以提高性能
-            self.stop_sequences_cache[stop_stage] = stop_sequences
-        
         # 创建采样参数
         sampling_params = self.SamplingParams(
             max_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
-            stop=stop_sequences,
             repetition_penalty=1.1,  # 匹配use_transformers的设置
         )
         
@@ -227,21 +217,6 @@ class use_vLLM:
         
         # 提取生成的文本
         response = outputs[0].outputs[0].text
-        
-        # 处理正则表达式停止条件
-        if stop_stage and self.use_stop:
-            from stop_sequences import get_regex_patterns
-            import re
-            
-            regex_patterns = get_regex_patterns(stop_stage)
-            if regex_patterns:
-                for pattern in regex_patterns:
-                    pattern_obj = re.compile(pattern)
-                    match = pattern_obj.search(response)
-                    if match:
-                        # 找到匹配，截断到匹配位置
-                        response = response[:match.end()]
-                        break
         
         return response
 
@@ -344,17 +319,10 @@ class use_async_vLLM:
         if not do_sample:
             temperature = 0.0
         
-        stop_sequences = []
-        if stop_stage and self.use_stop:
-            from stop_sequences import get_stop_sequences
-            stop_sequences = get_stop_sequences(stop_stage)
-            self.stop_sequences_cache[stop_stage] = stop_sequences
-        
         sampling_params = self.SamplingParams(
             max_tokens=max_new_tokens,
             n=n,
             temperature=temperature,
-            stop=stop_sequences,
             skip_special_tokens=skip_special_tokens,
             repetition_penalty=1.1
         )
@@ -366,23 +334,6 @@ class use_async_vLLM:
         
         final_output = results[-1]
         texts = [o.text for o in final_output.outputs]
-        
-        if stop_stage and self.use_stop:
-            from stop_sequences import get_regex_patterns
-            import re
-            regex_patterns = get_regex_patterns(stop_stage)
-            if regex_patterns:
-                compiled = [re.compile(p) for p in regex_patterns]
-                new_texts = []
-                for t in texts:
-                    clipped = t
-                    for pattern in compiled:
-                        m = pattern.search(clipped)
-                        if m:
-                            clipped = clipped[:m.end()]
-                            break
-                    new_texts.append(clipped)
-                texts = new_texts
         
         return texts
 

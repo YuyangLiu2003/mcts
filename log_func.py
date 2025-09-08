@@ -36,7 +36,7 @@ def test_out(output_title, output_content="", case_idx=None, dataset_name=None):
         
         # 为每个case创建新的日志文件
         if log_file is None or not log_file.endswith(f"case_{case_idx:04d}.txt"):
-            log_file = os.path.join(log_dir, f"log_{dataset_name}_case_{case_idx:04d}.txt")
+            log_file = os.path.join(log_dir, f"case_{case_idx:04d}.txt")
         
         # 追加写入日志文件
         with open(log_file, 'a', encoding='utf-8') as f:

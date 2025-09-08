@@ -3,35 +3,38 @@ import re
 from typing import Dict, List, Any
 
 class SearchGuideHandler:
-    def __init__(self, guide_file: str = "search_guide.json"):
+    def __init__(self, guide_file: str = "search_guide.json", dataset_name: str = None):
         """
         初始化SearchGuideHandler，负责管理和加载搜索指导配置
         
         Args:
             guide_file: 搜索指导配置文件的路径
+            dataset_name: 数据集名称
         """
         self.guide_file = guide_file
+        self.dataset_name = dataset_name
         self.guide_config = self._load_guide_config()
     
     def _load_guide_config(self) -> Dict[str, str]:
         """从JSON文件加载搜索指导配置"""
         try:
             with open(self.guide_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                guide_config = json.load(f)
+                if self.dataset_name in guide_config:
+                    return guide_config[self.dataset_name]
+                else:
+                    #print(f"Warning: {self.dataset_name} not found in {self.guide_file}, using default values")
+                    return guide_config['default']
         except FileNotFoundError:
             print(f"Warning: {self.guide_file} not found, using default values")
-            return self._get_default_config()
+            return None
         except Exception as e:
             print(f"Error loading {self.guide_file}: {e}")
-            return self._get_default_config()
-    
-    def _get_default_config(self) -> Dict[str, str]:
-        """获取默认配置"""
-        return {
-            "expand_guidance": "",
-            "process_criterions": "逻辑清晰、步骤合理、推理正确",
-            "reward_objectives": "答案正确、推理完整"
-        }
+            return None
+
+    def get_idea_guidance(self) -> str:
+        """获取核心想法指导"""
+        return self.guide_config.get("idea_guidance", "")
     
     def get_expand_guidance(self) -> str:
         """获取扩展指导"""
@@ -39,11 +42,22 @@ class SearchGuideHandler:
     
     def get_process_criterions(self) -> str:
         """获取过程评价标准"""
-        return self.guide_config.get("process_criterions", "逻辑清晰、步骤合理、推理正确")
+        return self.guide_config.get("process_criterions", "")
     
     def get_reward_objectives(self) -> str:
         """获取奖励目标"""
-        return self.guide_config.get("reward_objectives", "答案正确、推理完整")
+        return self.guide_config.get("reward_objectives", "")
+    
+    def get_answer_restrictions(self) -> str:
+        """获取答案限制"""
+        return self.guide_config.get("answer_restrictions", "")
+    
+    def get_pairwise_criterions(self) -> str:
+        """获取成对评价标准"""
+        pairwise_criterions = self.guide_config.get("pairwise_criterions", "")
+        if not pairwise_criterions:
+            pairwise_criterions = self.get_process_criterions()
+        return pairwise_criterions
     
     def get_all_config(self) -> Dict[str, str]:
         """获取所有配置"""
@@ -98,13 +112,13 @@ class PromptHandler:
         
         return prompt
 
-    def get_diverse_ideas_prompt(self, previous_steps: str, num_ideas: int, expand_guidance: str = "") -> str:
+    def get_diverse_ideas_prompt(self, previous_steps: str, num_ideas: int, idea_guidance: str = "") -> str:
         """
         生成用于获取多样化核心想法的prompt
         
         Args:
             previous_steps: 之前的推理步骤
-            expand_guidance: 扩展指导
+            idea_guidance: 核心想法指导
             num_ideas: 需要生成的核心想法数量
         Returns:
             完整的prompt字符串
@@ -125,18 +139,19 @@ class PromptHandler:
         
         # 替换占位符
         prompt = prompt.replace("[previous steps]", previous_steps)
-        prompt = prompt.replace("[expand guidance]", expand_guidance)
+        prompt = prompt.replace("[idea guidance]", idea_guidance)
         prompt = prompt.replace("[num_ideas]", str(num_ideas))
         
         return prompt
     
-    def get_expand_prompt(self, previous_steps: str, core_instruction: str = "") -> str:
+    def get_expand_prompt(self, previous_steps: str, core_instruction: str = "", expand_guidance: str = "") -> str:
         """
         生成扩展步骤的prompt
         
         Args:
             previous_steps: 之前的推理步骤
             core_instruction: 该步骤的核心思路
+            expand_guidance: 扩展指导
         Returns:
             完整的prompt字符串
         """
@@ -157,6 +172,7 @@ class PromptHandler:
         # 替换占位符
         prompt = prompt.replace("[previous steps]", previous_steps)
         prompt = prompt.replace("[core instruction]", core_instruction)
+        prompt = prompt.replace("[expand guidance]", expand_guidance)
         
         return prompt
     
@@ -225,14 +241,14 @@ class PromptHandler:
         prompt = prompt.replace("[process criterions]", process_criterions)
         return prompt
 
-    def get_pair_evaluation_prompt(self, previous_steps: str, stepA: str, stepB: str, process_criterions: str) -> str:
+    def get_pair_evaluation_prompt(self, previous_steps: str, stepA: str, stepB: str, pairwise_criterions: str) -> str:
         """
         构建成对比较评估的prompt
         
         Args:
             stepA: 步骤A的内容
             stepB: 步骤B的内容
-            process_criterions: 过程评价标准
+            pairwise_criterions: 成对比较标准
         Returns:
             完整的prompt字符串
         """
@@ -251,20 +267,21 @@ class PromptHandler:
         prompt = "".join([prefix, prompt, suffix])
 
         # 替换占位符
-        prompt = prompt.replace("[previous steps]", previous_steps)  # 这里暂时不使用previous_steps
-        prompt = prompt.replace("[process criterions]", process_criterions)
+        prompt = prompt.replace("[previous steps]", previous_steps)  
+        prompt = prompt.replace("[pairwise criterions]", pairwise_criterions)
         prompt = prompt.replace("[Step A]", stepA)
         prompt = prompt.replace("[Step B]", stepB)
         
         return prompt
         
-    def get_best_answer_prompt(self, question: str, reasoning_path: list) -> str:
+    def get_best_answer_prompt(self, question: str, best_solution: str, answer_restrictions: str) -> str:
         """
         构建生成最终答案的prompt
         
         Args:
             question: 用户输入的问题
-            reasoning_path: 最佳推理路径
+            best_solution: 最佳推理路径
+            answer_restrictions: 答案限制
         Returns:
             完整的prompt字符串
         """
@@ -282,12 +299,9 @@ class PromptHandler:
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         prompt = "".join([prefix, prompt, suffix])
         
-        # 将推理路径转换为字符串
-        reasoning_text = "\n".join(reasoning_path)
-        
         # 替换占位符
-        prompt = prompt.replace("[user question]", question)
-        prompt = prompt.replace("[reasoning path]", reasoning_text)
+        prompt = prompt.replace("[best solution]", best_solution)
+        prompt = prompt.replace("[answer restrictions]", answer_restrictions)
         
         return prompt
 
@@ -347,7 +361,7 @@ class ResponseHandler:
             if r'\boxed{' in check_terminal_content and r'\boxed{' not in response:
                 # 提取boxed内容
                 import re
-                boxed_match = re.search(r'\\boxed\{([^}]+)\}', check_terminal_content)
+                boxed_match = re.search(r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}', check_terminal_content)
                 if boxed_match:
                     boxed_content = f"\\boxed{{{boxed_match.group(1)}}}"
                     # 在</step>之前添加boxed内容
@@ -485,3 +499,41 @@ class ResponseHandler:
         except Exception as e:
             print(f"Error parsing pair evaluation response: {e}")
             return 0  # 出错时默认平局
+
+    def parse_best_answer(self, response: str) -> str:
+        """
+        解析最佳答案
+        
+        Args:
+            response: LLM生成的最终答案响应文本
+        Returns:
+            提取出的答案字符串
+        """
+        # 完整响应文本，用于解析
+        complete_response = "The final answer is: \\boxed{" + response
+        
+        try:
+            # 尝试从响应中提取\\boxed{}格式的答案
+            boxed_match = re.search(r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}', complete_response)
+            if boxed_match:
+                return boxed_match.group(1).strip()
+            
+            # 如果没有找到boxed格式，尝试其他常见的答案格式
+            answer_patterns = [
+                r'answer is[：:]?\s*([^\n]+)',
+                r'the answer is[：:]?\s*([^\n]+)',
+                r'final answer[：:]?\s*([^\n]+)',
+            ]
+            
+            for pattern in answer_patterns:
+                matches = re.findall(pattern, complete_response, re.IGNORECASE)
+                if matches:
+                    return matches[-1].strip()
+            
+            # 如果都没找到，返回原始响应的前100个字符作为回退
+            return response.strip()[:100]
+            
+        except Exception as e:
+            print(f"Error parsing best answer: {e}")
+            # 出错时返回原始响应的前100个字符
+            return response.strip()[:100]

@@ -2,21 +2,18 @@
 
 # 这个脚本用于运行MCTS_reasoning.py，实现基于蒙特卡洛树搜索的推理
 # 指定显卡
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 # 设置默认参数
-DATASET="open_questions"          # 数据集名称，可选：amc23, GSM8K, aime2024等
+DATASET="math500"          # 数据集名称，可选：amc23, aime2024等
 MODEL="../llama3/models/Qwen2.5-7B-Instruct"  # 模型路径或名称
 CASE_START=1           # 起始案例索引
-CASE_END=2            # 结束案例索引
+CASE_END=500            # 结束案例索引
 ITERATIONS=15           # MCTS迭代次数
 BRANCH_FACTOR_INIT=3    # 初始步骤生成的分支因子
 BRANCH_FACTOR=3         # MCTS扩展的分支因子
-ROLLOUT_NUM=4           # 展开次数
-MAX_DEPTH=20            # MCTS树的最大深度
+ROLLOUT_NUM=3           # 展开次数
+MAX_DEPTH=10            # MCTS树的最大深度
 BALANCE_BETA=0.65       # 过程奖励和rollout奖励的加权系数 (0-1)
-EXPAND_GUIDANCE=""      # 扩展指导（如果为空则从search_guide.json读取）
-PROCESS_CRITERIONS=""   # 过程评价标准（如果为空则从search_guide.json读取）
-REWARD_OBJECTIVES=""    # 奖励目标（如果为空则从search_guide.json读取）
 RUN_MODE="async_vllm"   # 运行模式：aihub, transformer, vllm, async_vllm, debug
 PAIR_SIGNAL=true        # 是否打开对比奖励信号
 PROCESS_SIGNAL=true    # 是否打开过程评估信号
@@ -65,18 +62,6 @@ while [[ $# -gt 0 ]]; do
       BALANCE_BETA="$2"
       shift 2
       ;;
-    --expand_guidance)
-      EXPAND_GUIDANCE="$2"
-      shift 2
-      ;;
-    --process_criterions)
-      PROCESS_CRITERIONS="$2"
-      shift 2
-      ;;
-    --reward_objectives)
-      REWARD_OBJECTIVES="$2"
-      shift 2
-      ;;
     --run_mode)
       RUN_MODE="$2"
       shift 2
@@ -106,9 +91,6 @@ while [[ $# -gt 0 ]]; do
       echo "  --rollout_num NUM            展开次数 (默认: 2)"
       echo "  --max_depth NUM              MCTS树的最大深度 (默认: 5)"
       echo "  --balance_beta NUM           过程奖励和rollout奖励的加权系数 (0-1) (默认: 0.5)"
-      echo "  --expand_guidance STR        扩展指导 (默认: 从search_guide.json读取)"
-      echo "  --process_criterions STR     过程评价标准 (默认: 从search_guide.json读取)"
-      echo "  --reward_objectives STR      奖励目标 (默认: 从search_guide.json读取)"
       echo "  --run_mode MODE              运行模式: aihub, transformer, vllm, async_vllm, debug (默认: async_vllm)"
       echo "  --pair_signal BOOL           是否打开对比奖励信号 (默认: true)"
       echo "  --process_signal BOOL        是否打开过程评估信号 (默认: false)"
@@ -135,9 +117,6 @@ echo "初始分支因子: $BRANCH_FACTOR_INIT"
 echo "展开次数: $ROLLOUT_NUM"
 echo "最大深度: $MAX_DEPTH"
 echo "平衡系数: $BALANCE_BETA"
-[[ -n "$EXPAND_GUIDANCE" ]] && echo "扩展指导: $EXPAND_GUIDANCE" || echo "扩展指导: 从search_guide.json读取"
-[[ -n "$PROCESS_CRITERIONS" ]] && echo "过程评价标准: $PROCESS_CRITERIONS" || echo "过程评价标准: 从search_guide.json读取"
-[[ -n "$REWARD_OBJECTIVES" ]] && echo "奖励目标: $REWARD_OBJECTIVES" || echo "奖励目标: 从search_guide.json读取"
 echo "运行模式: $RUN_MODE"
 echo "对比奖励信号: $PAIR_SIGNAL"
 echo "过程评估信号: $PROCESS_SIGNAL"
@@ -162,9 +141,6 @@ cd /root/data1/hesaikenew/data/ted_LLM/MCTS_Async && python MCTS_reasoning.py \
   --rollout_num "$ROLLOUT_NUM" \
   --max_depth "$MAX_DEPTH" \
   --balance_beta "$BALANCE_BETA" \
-  ${EXPAND_GUIDANCE:+--expand_guidance "$EXPAND_GUIDANCE"} \
-  ${PROCESS_CRITERIONS:+--process_criterions "$PROCESS_CRITERIONS"} \
-  ${REWARD_OBJECTIVES:+--reward_objectives "$REWARD_OBJECTIVES"} \
   --run_mode "$RUN_MODE" \
   --pair_signal "$PAIR_SIGNAL" \
   --process_signal "$PROCESS_SIGNAL" \

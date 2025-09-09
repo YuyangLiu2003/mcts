@@ -26,7 +26,7 @@ def extract_reasoning_and_answer(log_file_path):
             reasoning_path = reasoning_match.group(1).strip()
             
             # 提取推理路径中被\boxed{}包围的所有答案
-            answer_matches = re.findall(r'\\boxed{(.*?)}', reasoning_path, re.DOTALL)
+            answer_matches = re.findall(r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}', reasoning_path, re.DOTALL)
             
             final_answer = None
             # 选择第一个非空的boxed内容作为答案
@@ -57,20 +57,20 @@ def extract_reasoning_and_answer(log_file_path):
 
 def extract_case_info(filename):
     """
-    从日志文件名中提取数据集名称和案例ID
+    从日志文件名中提取案例ID
     
     参数:
-        filename: 格式为log_{dataset_name}_case_{case_id}.txt的日志文件名
+        filename: 格式为case_{case_id}.txt的日志文件名
     
     返回:
-        tuple: (数据集名称, 案例ID)
+        str: 案例ID
     """
-    match = re.search(r'log_([^_]+)_case_(\d+)\.txt', filename)
+    match = re.search(r'case_(\d+)\.txt', filename)
     if match:
-        dataset_name = match.group(1)
-        case_id = match.group(2)
-        return dataset_name, case_id
-    return "unknown", "unknown"
+        case_id = match.group(1)
+        print(f"匹配到案例ID: {case_id}")
+        return case_id
+    return "unknown"
 
 def process_log_files(input_path, reasoning_output_path, answer_output_path):
     """
@@ -89,7 +89,7 @@ def process_log_files(input_path, reasoning_output_path, answer_output_path):
         # 处理目录中的所有日志文件
         for root, _, files in os.walk(input_path):
             for file in files:
-                if file.endswith('.txt') and 'log' in file:
+                if file.endswith('.txt') and ('log' in file or 'case_' in file):
                     file_path = os.path.join(root, file)
                     process_single_file(file_path, reasoning_output_path, answer_output_path)
     else:
@@ -108,11 +108,11 @@ def process_single_file(file_path, reasoning_output_path, answer_output_path):
     reasoning_path, final_answer = extract_reasoning_and_answer(file_path)
     
     filename = os.path.basename(file_path)
-    dataset_name, case_id = extract_case_info(filename)
+    case_id = extract_case_info(filename)
     
     # 创建输出文件名
-    reasoning_filename = f"{dataset_name}_case_{case_id}_reasoning.txt"
-    answer_filename = f"{dataset_name}_case_{case_id}_answer.txt"
+    reasoning_filename = f"case_{case_id}_path.txt"
+    answer_filename = f"case_{case_id}_answer.txt"
     
     # 将推理路径保存到单独的文件
     if reasoning_path:
@@ -140,4 +140,4 @@ def main():
     process_log_files(args.input, args.reasoning_output, args.answer_output)
     
 if __name__ == '__main__':
-    main() 
+    main()

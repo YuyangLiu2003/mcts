@@ -45,11 +45,11 @@ def load_extracted_answers(answers_dir, dataset_name):
     try:
         # 遍历答案目录
         for filename in os.listdir(answers_dir):
-            if not filename.startswith(dataset_name) or not filename.endswith('_answer.txt'):
+            if not filename.endswith('_answer.txt') or not filename.startswith('case_'):
                 continue
                 
             # 从文件名中提取case_id
-            match = re.search(rf'{dataset_name}_case_(\d+)_answer\.txt', filename)
+            match = re.search(r'case_(\d+)_answer\.txt', filename)
             if not match:
                 continue
                 
@@ -233,4 +233,4 @@ def main():
         save_results(accuracy, correct_count, total_evaluated, case_results, args.output, args.dataset_name)
 
 if __name__ == '__main__':
-    main() 
+    main()

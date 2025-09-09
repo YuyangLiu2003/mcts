@@ -22,14 +22,14 @@
 
 # 实际执行的命令
 # 默认处理最新的日志目录
-LOG_DIR="/root/MCTS_Reasoning/logs/amc23_20250824_165011_1_10"
-OUTPUT_DIR="/root/MCTS_Reasoning/extract/amc23_20250824_165011_1_10"
+LOG_DIR="/root/data1/hesaikenew/data/ted_LLM/MCTS_Async/logs/math500_20250908_233346_1_500"
+OUTPUT_DIR="/root/data1/hesaikenew/data/ted_LLM/MCTS_Async/extract/math500_20250908_233346_1_500"
 
 # 确保输出目录存在
 mkdir -p ${OUTPUT_DIR}
 
 # 执行提取脚本
-python extract_reasoning.py \
+python /root/data1/hesaikenew/data/ted_LLM/MCTS_Async/extract_reasoning.py \
     --input ${LOG_DIR} \
     --reasoning_output ${OUTPUT_DIR}/reasoning_paths \
     --answer_output ${OUTPUT_DIR}/answers

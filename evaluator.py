@@ -116,7 +116,7 @@ class PairwiseRewardModel:
         )
         response = await self.llm_client.generate(prompt,
                                                 stop_stage='pair_evaluation',
-                                                skip_special_tokens=False)
+                                                skip_special_tokens=False,)
         score = self.response_handler.parse_pair_evaluation_response(response)
         pair["score"] = score
         pair["prompt"] = prompt

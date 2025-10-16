@@ -412,12 +412,12 @@ class ResponseHandler:
         解析reward评估的分数
         """
         try:
-            score_match = re.search(r'\[Score\]:\s*(\d+)', response)
+            score_match = re.search(r'\[Score\]\s*:?\s*(\d+)', response)
             if score_match:
                 score = int(score_match.group(1))
                 score = max(0, min(10, score))
             else:
-                print(f"Warning: Could not extract score from response: {response}")
+                print(f"Warning: Could not extract rollout score from response: {response}")
                 score = 5.0
         except Exception as e:
             print(f"Error evaluating response: {e}")
@@ -429,7 +429,7 @@ class ResponseHandler:
         解析process evaluation的分数
         """
         try:
-            score_match = re.search(r'\[Score\]:\s*(\d+)', response)
+            score_match = re.search(r'\[Score\]\s*:?\s*(\d+)', response)
             if score_match:
                 score = int(score_match.group(1))
                 score = max(0, min(10, score))

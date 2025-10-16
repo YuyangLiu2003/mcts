@@ -313,12 +313,19 @@ class use_async_vLLM:
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
         
         # 获取tokenizer以便与stop_sequences.py兼容
-        self.tokenizer = self.engine.get_tokenizer()
+        # self.tokenizer = asyncio.run(self.engine.get_tokenizer())
         
         # 存储常用的停止序列
         self.stop_sequences_cache = {}
         # 新增：控制是否使用停止序列/正则
         self.use_stop = use_stop
+
+    # 2. 新增异步方法，专门用于获取 tokenizer（在主线程异步上下文调用）
+    async def initialize_tokenizer(self):
+        """必须在主线程的异步函数中调用，直接用 await 获取 tokenizer"""
+        if not hasattr(self, 'tokenizer'):
+            self.tokenizer = await self.engine.get_tokenizer()  # 直接 await，无循环问题
+            print("Tokenizer initialized successfully")
 
     def __del__(self):
         """
@@ -349,20 +356,38 @@ class use_async_vLLM:
         )
         return texts[0] if texts else ""
 
-    async def batch_generate(self, prompt, max_new_tokens=500, n=3, do_sample=True, temperature=0.7, 
-                            stop_stage=None, skip_special_tokens=True):
-        print("###start asynchronous generating with vLLM (batch): ", stop_stage)
+    async def batch_generate(self, prompt, **kwargs):
+        # 设置默认参数
+        defaults = {
+            "max_tokens": 1024,
+            "n": 3,
+            "do_sample": True,
+            "temperature": 0.7,
+            "stop_stage": None,
+            "skip_special_tokens": True,
+            "seed": 42,
+            "repetition_penalty": 1.1
+        }
         
-        if not do_sample:
-            temperature = 0.0
+        if "max_new_tokens" in kwargs:
+            kwargs["max_tokens"] = kwargs["max_new_tokens"]
+            del kwargs["max_new_tokens"]
+        # 合并默认参数和传入的kwargs（传入的参数会覆盖默认值）
+        params = {** defaults, **kwargs}
+        # print(f"###start asynchronous generating with vLLM (batch): {params['stop_stage']}")
         
-        sampling_params = self.SamplingParams(
-            max_tokens=max_new_tokens,
-            n=n,
-            temperature=temperature,
-            skip_special_tokens=skip_special_tokens,
-            repetition_penalty=1.1
-        )
+        # 处理do_sample和temperature的关系
+        if not params["do_sample"]:
+            params["temperature"] = 0.0
+        
+        # 构建SamplingParams，只传递它支持的参数
+        sampling_kwargs = {
+            k: v for k, v in params.items()
+            if k in ["max_tokens", "n", "temperature", "skip_special_tokens", 
+                    "repetition_penalty", "seed", "stop", "top_p", "top_k"]  # 包含vLLM支持的常见参数
+        }
+        
+        sampling_params = self.SamplingParams(** sampling_kwargs)
         
         request_id = f"req-{asyncio.get_running_loop().time()}"
         results = []
@@ -375,11 +400,11 @@ class use_async_vLLM:
             for output in request_output.outputs:
                 if output.finish_reason is not None:  # 序列已完成
                     completed_outputs[output.index] = output
-            
-            # 如果所有序列都完成了，可以提前退出
-            if len(completed_outputs) >= n:
-                break
         
+        # 处理最终结果
+        if len(completed_outputs) == params["n"]:
+            # 所有序列都已完成
+            final_outputs = [completed_outputs[i] for i in range(params["n"])]
         else:
             # 使用最后一个request_output中的结果
             final_output = results[-1] if results else None
@@ -389,17 +414,10 @@ class use_async_vLLM:
                 final_outputs = []
         
         # 确保我们有n个输出
-        if len(final_outputs) < n:
-            print(f"Warning: Expected {n} outputs, but got {len(final_outputs)}")
+        if len(final_outputs) < params["n"]:
+            print(f"Warning: Expected {params['n']} outputs, but got {len(final_outputs)}")
         
         texts = [o.text for o in final_outputs]
-        
-        if stop_stage == 'initial_step':
-            print("result[1]: ", results[1])
-            print("result[-2]: ", results[-2])
-            print("result[-1]: ", results[-1])
-            print("completed_outputs: ", completed_outputs)
-            print("final texts length: ", len(texts))
         
         return texts
 
@@ -452,9 +470,12 @@ class use_debug:
 
 async def async_test():
     async_vllm = use_async_vLLM(model_name="../models/Meta-Llama-3.1-8B-Instruct")
+    await async_vllm.init_tokenizer()
     start_time = time.time()
-    responses = await async_vllm.batch_generate(prompt=r"""PhD is hard to get.""", max_new_tokens=100, n=3, stop_stage="initial_step")
+    responses = await async_vllm.batch_generate(prompt=r"""PhD is hard to get.""", max_new_tokens=100, n=5, stop_stage="rollout", seed=None)
     print("haha: ",len(responses))
+    for res in responses:
+        print(res+"\n**************")
     # 计算并显示运行时间
     end_time = time.time()
     runtime = end_time - start_time
@@ -464,14 +485,14 @@ def sync_test():
     LLM = use_vLLM('../models/Meta-Llama-3.1-8B-Instruct')
     responses = LLM.batch_generate(
         r"PhD is hard to get.",
-        temperature=0.7, stop_stage='initial_step',max_new_tokens=100, n=3
+        temperature=0.7, stop_stage='rollout',max_new_tokens=100, n=3
     )
     #print(responses)
     print("haha: ",len(responses))
 
 
 if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     asyncio.run(async_test())
     #sync_test()
 

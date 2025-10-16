@@ -347,7 +347,8 @@ class MCTS_Reasoner:
                     explore_score = None
                     score = float('inf')
                 else:
-                    exploit_score = ((child.value / child.visits) - node.child_mean) / (node.child_diff if node.child_diff != 0 else 1.0)
+                    # exploit_score = ((child.value / child.visits) - node.child_mean) / (node.child_diff if node.child_diff != 0 else 1.0)
+                    exploit_score = child.value / child.visits  # 直接使用Q值作为 exploit_score
                     explore_score = math.sqrt(math.log(max(node.visits, 1)) / child.visits)
                     score = exploit_score + self.exploration_constant * explore_score
 
@@ -1102,8 +1103,8 @@ async def main():
     parser.add_argument("--dataset_name", type=str, default="amc23", help="Name of the dataset") 
     parser.add_argument("--model", type=str, default="../models/Meta-Llama-3.1-8B-Instruct", 
                        help="模型名称或路径。对于aihub模式，使用模型名称（如qwen-max）；对于transformer和vllm模式，使用模型路径")
-    parser.add_argument("--case_start", type=int, default=10, help="Start index of cases")
-    parser.add_argument("--case_end", type=int, default=10, help="End index of cases")
+    parser.add_argument("--case_start", type=int, default=1, help="Start index of cases")
+    parser.add_argument("--case_end", type=int, default=40, help="End index of cases")
     parser.add_argument("--num_iterations", type=int, default=15, help="Number of MCTS iterations")
     parser.add_argument("--branch_factor", type=int, default=3, 
                        help="Branch factor for MCTS expansion")
@@ -1121,9 +1122,9 @@ async def main():
                        help="Maximum depth of the MCTS tree")
     parser.add_argument("--balance_beta", type=float, default=0.65,
                        help="过程奖励和rollout奖励的加权系数 (0-1)")
-    parser.add_argument("--pairwise_weight", type=float, default=0.3,
+    parser.add_argument("--pairwise_weight", type=float, default=0.5,
                        help="对比奖励信号的权重")
-    parser.add_argument("--process_weight", type=float, default=0.3,
+    parser.add_argument("--process_weight", type=float, default=0.2,
                        help="过程评估信号的权重")
     parser.add_argument("--rollout_weight", type=float, default=0.3,
                        help="rollout模拟评估信号的权重")
@@ -1162,6 +1163,7 @@ async def main():
         llm = use_vLLM(args.model)
     elif args.run_mode == "async_vllm":
         llm = use_async_vLLM(args.model)
+        await llm.initialize_tokenizer()
     elif args.run_mode == "debug":
         llm = use_debug(args.model)
     else:
@@ -1388,5 +1390,5 @@ def run_main():
 
 if __name__ == "__main__":
     # 限制只使用显卡x
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     run_main()

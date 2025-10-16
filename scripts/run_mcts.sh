@@ -4,11 +4,11 @@
 # 指定显卡
 export CUDA_VISIBLE_DEVICES=1
 # 设置默认参数
-DATASET="amc23"          # 数据集名称，可选：amc23, aime2024等
+DATASET="math500"          # 数据集名称，可选：amc23, aime2024等
 # MODEL="../llama3/models/Qwen2.5-7B-Instruct"  # 模型路径或名称
-MODEL="../llama3/models/Meta-Llama-3.1-8B-Instruct"  # 模型路径或名称
+MODEL="../models/Meta-Llama-3.1-8B-Instruct"  # 模型路径或名称
 CASE_START=1           # 起始案例索引
-CASE_END=1            # 结束案例索引
+CASE_END=500            # 结束案例索引
 ITERATIONS=15           # MCTS迭代次数
 BRANCH_FACTOR_INIT=3    # 初始步骤生成的分支因子
 BRANCH_FACTOR=3         # MCTS扩展的分支因子
@@ -16,9 +16,11 @@ ROLLOUT_NUM=3           # 展开次数
 MAX_DEPTH=10            # MCTS树的最大深度
 BALANCE_BETA=0.65       # 过程奖励和rollout奖励的加权系数 (0-1)
 RUN_MODE="async_vllm"   # 运行模式：aihub, transformer, vllm, async_vllm, debug
-PAIR_SIGNAL=false        # 是否打开对比奖励信号
-PROCESS_SIGNAL=true    # 是否打开过程评估信号
-ROLLOUT_SIGNAL=false    # 是否打开rollout模拟评估信号
+PAIRWISE_WEIGHT=0.5      # 对比奖励信号的权重
+PROCESS_WEIGHT=0.2       # 过程评估信号的权重
+ROLLOUT_WEIGHT=0.3       # rollout模拟评估信号的权重
+
+
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -67,16 +69,16 @@ while [[ $# -gt 0 ]]; do
       RUN_MODE="$2"
       shift 2
       ;;
-    --pair_signal)
-      PAIR_SIGNAL="$2"
+    --pairwise_weight)
+      PAIRWISE_WEIGHT="$2"
       shift 2
       ;;
-    --process_signal)
-      PROCESS_SIGNAL="$2"
+    --process_weight)
+      PROCESS_WEIGHT="$2"
       shift 2
       ;;
-    --rollout_signal)
-      ROLLOUT_SIGNAL="$2"
+    --rollout_weight)
+      ROLLOUT_WEIGHT="$2"
       shift 2
       ;;
     --help)
@@ -93,9 +95,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --max_depth NUM              MCTS树的最大深度 (默认: 5)"
       echo "  --balance_beta NUM           过程奖励和rollout奖励的加权系数 (0-1) (默认: 0.5)"
       echo "  --run_mode MODE              运行模式: aihub, transformer, vllm, async_vllm, debug (默认: async_vllm)"
-      echo "  --pair_signal BOOL           是否打开对比奖励信号 (默认: true)"
-      echo "  --process_signal BOOL        是否打开过程评估信号 (默认: false)"
-      echo "  --rollout_signal BOOL        是否打开rollout模拟评估信号 (默认: true)"
+      echo "  --pairwise_weight NUM        对比奖励信号的权重 (默认: 0.5)"
+      echo "  --process_weight NUM         过程评估信号的权重 (默认: 0.2)"
+      echo "  --rollout_weight NUM         rollout模拟评估信号的权重 (默认: 0.3)"
       echo "  --help                       显示此帮助信息"
       exit 0
       ;;
@@ -119,19 +121,19 @@ echo "展开次数: $ROLLOUT_NUM"
 echo "最大深度: $MAX_DEPTH"
 echo "平衡系数: $BALANCE_BETA"
 echo "运行模式: $RUN_MODE"
-echo "对比奖励信号: $PAIR_SIGNAL"
-echo "过程评估信号: $PROCESS_SIGNAL"
-echo "rollout模拟评估信号: $ROLLOUT_SIGNAL"
+echo "对比奖励信号的权重: $PAIRWISE_WEIGHT"
+echo "过程评估信号的权重: $PROCESS_WEIGHT"
+echo "rollout模拟评估信号的权重: $ROLLOUT_WEIGHT"
 echo ""
 
 # 设置数据集目录的绝对路径
-DATASET_DIR="/root/data1/hesaikenew/data/ted_LLM/MCTS_Async/datasets"
+DATASET_DIR="/data/wuyang/MCTS_Reasoning/datasets"
 
 # 运行Python脚本
 
 export VLLM_LOGGING_LEVEL=error
 
-cd /root/data1/hesaikenew/data/ted_LLM/MCTS_Async && python MCTS_reasoning.py \
+cd /data/wuyang/MCTS_Reasoning && python MCTS_reasoning.py \
   --dataset_name "$DATASET" \
   --model "$MODEL" \
   --case_start "$CASE_START" \
@@ -143,6 +145,6 @@ cd /root/data1/hesaikenew/data/ted_LLM/MCTS_Async && python MCTS_reasoning.py \
   --max_depth "$MAX_DEPTH" \
   --balance_beta "$BALANCE_BETA" \
   --run_mode "$RUN_MODE" \
-  --pair_signal "$PAIR_SIGNAL" \
-  --process_signal "$PROCESS_SIGNAL" \
-  --rollout_signal "$ROLLOUT_SIGNAL" \
+  --pairwise_weight "$PAIRWISE_WEIGHT" \
+  --process_weight "$PROCESS_WEIGHT" \
+  --rollout_weight "$ROLLOUT_WEIGHT" \

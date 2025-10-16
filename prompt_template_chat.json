@@ -26,19 +26,19 @@
   "process_evaluation":{
     "prefix": "[previous steps]\n",
     "system_prompt": "",
-    "user_prompt": "Please evaluate the quality of the current step based on the process criterions ([process criterions]), and then give a score from 0 to 10 (0 means the step is extremely poor, 10 means the step is perfectly good). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 9)\n</evaluation>\n\nThe current step is: [current step]\n",
+    "user_prompt": "Please evaluate the quality of the current step based on the process criterions ([process criterions]), and then give a score from 0 to 10 (0 means the step is extremely poor, 10 means the step is perfectly good). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 9)\n</evaluation>\n\nThe current step is: [current step]\n",
     "suffix": "<evaluation>\n[Analysis]:"
   },
   "reward_evaluation":{
     "prefix": "[full solution]\n",
     "system_prompt": "",
-    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10 (0 means the solution is extremely poor, 10 means the solution is perfectly done). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 9)\n</evaluation>\n",
+    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10 (0 means the solution is extremely poor, 10 means the solution is perfectly done). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 9)\n</evaluation>\n",
     "suffix": "<evaluation>\n[Analysis]:"
   },
   "pair_evaluation":{
     "prefix": "[previous steps]\n",
     "system_prompt": "",
-    "user_prompt": "Please compare the quality of Step A and Step B based on the process criterions ([pairwise criterions]), first conduct an in-depth analysis of their quality differences, and then evaluate which is better(A, B, or Tied), give a Score that reflects how much better (0 means tied, 5 means much better). Strictly provide your comparison result in the following format:\n<comparison>\n[Analysis]: Compare and analyze the performance of Step A and Step B in meeting the process criterions respectively, focus on pointing out the advantages and disadvantages of Step A relative to Step B.\n[The better step]: A or B or Tied\n[Score]: X (where X is an integer from 0 to 5)\n</comparison>\nThe Step A is: [Step A]\n\nThe Step B is: [Step B]\n\n",
+    "user_prompt": "Please compare the quality of Step A and Step B based on the process criterions ([pairwise criterions]), first conduct an in-depth analysis of their quality differences, and then evaluate which is better(A, B, or Tied), give a Score that reflects how much better (0 means tied, 5 means much better). Strictly provide your comparison result in the following format:\n<comparison>\n[Analysis]: Compare and briefly analyze the performance of Step A and Step B in meeting the process criterions respectively, focus on pointing out the advantages and disadvantages of Step A relative to Step B.\n[The better step]: A or B or Tied\n[Score]: X (where X is an integer from 0 to 5)\n</comparison>\nThe Step A is: [Step A]\n\nThe Step B is: [Step B]\n\n",
     "suffix": "<comparison>\n[Analysis]:"
   },
   "best_answer":{

@@ -220,6 +220,46 @@ class use_vLLM:
         
         return response
 
+    def batch_generate(self, prompt, max_new_tokens=500, n=1, do_sample=True, temperature=0.7, top_p=0.9, top_k=20, stop_stage=None, skip_special_tokens=True):
+        """
+        直接使用给定的 prompt 生成文本，添加终止条件
+        
+        Args:
+            prompt: 输入提示
+            max_new_tokens: 最大生成token数
+            do_sample: 是否使用采样
+            temperature: 温度参数
+            top_p: top-p采样参数
+            top_k: top-k采样参数
+            stop_stage: MCTS阶段名称，用于自动获取停止条件。只能通过token来stop，正则表达式是后裁剪
+            skip_special_tokens: 是否跳过特殊token
+        """
+        print("###start generating with vLLM: ", stop_stage)
+        
+        # 设置采样参数
+        if not do_sample:
+            temperature = 0.0
+            top_p = 1.0
+            top_k = -1
+        
+        # 创建采样参数
+        sampling_params = self.SamplingParams(
+            max_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            repetition_penalty=1.1,  # 匹配use_transformers的设置
+            n=n,
+        )
+        
+        # 生成文本
+        outputs = self.model.generate(prompt, sampling_params)
+        
+        # 修改：提取所有生成的文本并返回列表
+        texts = [output.text for output in outputs[0].outputs]
+        
+        return texts
+
 class use_async_vLLM:
     def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=4096, 
                  trust_remote_code=True, tensor_parallel_size=None, gpu_memory_utilization=0.9, max_num_seqs=256, use_stop=False):
@@ -309,12 +349,67 @@ class use_async_vLLM:
         )
         return texts[0] if texts else ""
 
-    async def batch_generate(self, prompt, max_new_tokens=500, n=1, do_sample=True, temperature=0.7, 
+    async def batch_generate(self, prompt, max_new_tokens=500, n=3, do_sample=True, temperature=0.7, 
+                            stop_stage=None, skip_special_tokens=True):
+        print("###start asynchronous generating with vLLM (batch): ", stop_stage)
+        
+        if not do_sample:
+            temperature = 0.0
+        
+        sampling_params = self.SamplingParams(
+            max_tokens=max_new_tokens,
+            n=n,
+            temperature=temperature,
+            skip_special_tokens=skip_special_tokens,
+            repetition_penalty=1.1
+        )
+        
+        request_id = f"req-{asyncio.get_running_loop().time()}"
+        results = []
+        completed_outputs = {}  # 存储已完成的序列，key为index
+        
+        async for request_output in self.engine.generate(prompt, sampling_params, request_id):
+            results.append(request_output)
+            
+            # 检查每个输出是否完成
+            for output in request_output.outputs:
+                if output.finish_reason is not None:  # 序列已完成
+                    completed_outputs[output.index] = output
+            
+            # 如果所有序列都完成了，可以提前退出
+            if len(completed_outputs) >= n:
+                break
+        
+        else:
+            # 使用最后一个request_output中的结果
+            final_output = results[-1] if results else None
+            if final_output:
+                final_outputs = final_output.outputs
+            else:
+                final_outputs = []
+        
+        # 确保我们有n个输出
+        if len(final_outputs) < n:
+            print(f"Warning: Expected {n} outputs, but got {len(final_outputs)}")
+        
+        texts = [o.text for o in final_outputs]
+        
+        if stop_stage == 'initial_step':
+            print("result[1]: ", results[1])
+            print("result[-2]: ", results[-2])
+            print("result[-1]: ", results[-1])
+            print("completed_outputs: ", completed_outputs)
+            print("final texts length: ", len(texts))
+        
+        return texts
+
+    async def batch_generate_backup(self, prompt, max_new_tokens=500, n=3, do_sample=True, temperature=0.7, 
                             stop_stage=None, skip_special_tokens=True):
         """
         多条轨迹并行采样，返回列表
         """
         print("###start asynchronous generating with vLLM (batch): ", stop_stage)
+        print("wow, n is: ", n)
         
         if not do_sample:
             temperature = 0.0
@@ -332,8 +427,13 @@ class use_async_vLLM:
         async for request_output in self.engine.generate(prompt, sampling_params, request_id):
             results.append(request_output)
         
+        if stop_stage=='initial_step':
+            print("result[1]: ", results[1])
+            print("result[-2]: ", results[-2])
+            print("result[-1]: ", results[-1])
         final_output = results[-1]
         texts = [o.text for o in final_output.outputs]
+        #print("@@@@@@@@@@", texts)
         
         return texts
 
@@ -350,19 +450,30 @@ class use_debug:
         """返回预设的调试响应"""
         pass
 
-async def main():
-    async_vllm = use_async_vLLM(model_name="../llama3/models/Meta-Llama-3.1-8B-Instruct")
+async def async_test():
+    async_vllm = use_async_vLLM(model_name="../models/Meta-Llama-3.1-8B-Instruct")
     start_time = time.time()
-    responses = await async_vllm.batch_generate(prompt=r"""PhD is hard to get.""", max_new_tokens=100, n=5)
-    print(responses)
+    responses = await async_vllm.batch_generate(prompt=r"""PhD is hard to get.""", max_new_tokens=100, n=3, stop_stage="initial_step")
+    print("haha: ",len(responses))
     # 计算并显示运行时间
     end_time = time.time()
     runtime = end_time - start_time
     print(f"\nRuntime: {runtime:.2f} seconds")
 
+def sync_test():
+    LLM = use_vLLM('../models/Meta-Llama-3.1-8B-Instruct')
+    responses = LLM.batch_generate(
+        r"PhD is hard to get.",
+        temperature=0.7, stop_stage='initial_step',max_new_tokens=100, n=3
+    )
+    #print(responses)
+    print("haha: ",len(responses))
+
+
 if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    asyncio.run(main())
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    asyncio.run(async_test())
+    #sync_test()
 
 """
 if __name__ == '__main__':

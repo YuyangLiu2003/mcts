@@ -4,10 +4,11 @@
 # 指定显卡
 export CUDA_VISIBLE_DEVICES=1
 # 设置默认参数
-DATASET="math500"          # 数据集名称，可选：amc23, aime2024等
-MODEL="../llama3/models/Qwen2.5-7B-Instruct"  # 模型路径或名称
+DATASET="amc23"          # 数据集名称，可选：amc23, aime2024等
+# MODEL="../llama3/models/Qwen2.5-7B-Instruct"  # 模型路径或名称
+MODEL="../llama3/models/Meta-Llama-3.1-8B-Instruct"  # 模型路径或名称
 CASE_START=1           # 起始案例索引
-CASE_END=500            # 结束案例索引
+CASE_END=1            # 结束案例索引
 ITERATIONS=15           # MCTS迭代次数
 BRANCH_FACTOR_INIT=3    # 初始步骤生成的分支因子
 BRANCH_FACTOR=3         # MCTS扩展的分支因子
@@ -15,9 +16,9 @@ ROLLOUT_NUM=3           # 展开次数
 MAX_DEPTH=10            # MCTS树的最大深度
 BALANCE_BETA=0.65       # 过程奖励和rollout奖励的加权系数 (0-1)
 RUN_MODE="async_vllm"   # 运行模式：aihub, transformer, vllm, async_vllm, debug
-PAIR_SIGNAL=true        # 是否打开对比奖励信号
+PAIR_SIGNAL=false        # 是否打开对比奖励信号
 PROCESS_SIGNAL=true    # 是否打开过程评估信号
-ROLLOUT_SIGNAL=true     # 是否打开rollout模拟评估信号
+ROLLOUT_SIGNAL=false    # 是否打开rollout模拟评估信号
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do

@@ -162,7 +162,7 @@ class MCTS_Reasoner:
                  rollout_num: int = 1, exploration_constant: float = 3, 
                  show_runtime: bool = True, verbose: bool = True,
                  max_depth: int = 5, branch_factor: int = 3, branch_factor_init: Any = None,
-                 balance_beta: float = 0.5, pair_signal: bool = True, process_signal: bool = True, rollout_signal: bool = True):
+                 balance_beta: float = 0.5, rollout_weight: float = 0.3, process_weight: float = 0.4, pairwise_weight: float = 0.3):
         """
         初始化MCTS推理器
         """
@@ -186,12 +186,16 @@ class MCTS_Reasoner:
         self.max_depth = max_depth
         self.branch_factor = branch_factor
         self.branch_factor_init = branch_factor_init if branch_factor_init is not None else branch_factor
-        self.balance_beta = balance_beta
-
-        # 奖励信号开关
-        self.pair_signal = pair_signal
-        self.process_signal = process_signal
-        self.rollout_signal = rollout_signal
+        self.balance_beta = balance_beta  # 保留参数以保持向后兼容
+        
+        # 新增：三个奖励权重参数
+        self.rollout_weight = rollout_weight  # 路径奖励权重
+        self.process_weight = process_weight  # 过程奖励权重
+        self.pairwise_weight = pairwise_weight  # 对比奖励权重
+        # 使用权重替代信号开关
+        print("rollout_weight: {}".format(self.rollout_weight))
+        print("process_weight: {}".format(self.process_weight))
+        print("pairwise_weight: {}".format(self.pairwise_weight))
         
         # 从Search_Guide中加载各种引导信息
         self.search_guide_handler = search_guide_handler
@@ -221,13 +225,12 @@ class MCTS_Reasoner:
         # 检查是否包含 \boxed{xxx} 或 </think>
         return r'\boxed{' in response or '</think>' in response
 
-    async def search(self, num_iterations: int = 20, branch_factor: int = 3) -> str:
+    async def search(self, num_iterations: int = 20) -> str:
         """
         执行MCTS搜索
         
         Args:
             num_iterations: 迭代次数
-            branch_factor: 每个节点的分支数量（子节点数）
         """
         start_time = time.time()
         
@@ -251,7 +254,9 @@ class MCTS_Reasoner:
         
         # 使用initial_step模板进行第一次展开，使用branch_factor_init
         prompt = self.prompt_handler.get_init_prompt(self.question)
+        print("haha, init factor is: ", self.branch_factor_init)
         responses = await self.llm_client.batch_generate(prompt, n=self.branch_factor_init, stop_stage="initial_step")
+        print("responses have: ", len(responses))
         for i, response in enumerate(responses):  # 修复：添加enumerate获取索引
             initial_step = self.response_handler.get_expand_step_init(response)
             test_out("initial_step", initial_step, self.case_idx, self.dataset_name)
@@ -296,7 +301,7 @@ class MCTS_Reasoner:
             if not node.is_final:
                 # 修改：使用 _async_expand 和 _async_simulate
                 new_nodes = await self._async_expand(node)
-                new_values = await self._async_simulate(new_nodes, self.pair_signal, self.process_signal, self.rollout_signal)
+                new_values = await self._async_simulate(new_nodes)
                 # 遍历所有新节点，对每个节点进行 simulate 和 backpropagate
                 for new_node, new_value in zip(new_nodes, new_values):
                     self._backpropagate(new_node, new_value)
@@ -468,16 +473,12 @@ class MCTS_Reasoner:
         self.save_tree_log()
         return new_node
         
-    async def _async_simulate(self, new_nodes: List[ReasoningNode], pair_signal: bool = True, 
-              process_signal: bool = True, rollout_signal: bool = True) -> List[float]:
+    async def _async_simulate(self, new_nodes: List[ReasoningNode]) -> List[float]:
         """
         异步模拟方法，根据信号开关决定执行哪些计算
         
         Args:
             new_nodes: 新生成的节点列表
-            pair_signal: 是否启用对比奖励计算
-            process_signal: 是否启用过程奖励计算
-            rollout_signal: 是否启用rollout奖励计算
         Returns:
             每个节点的最终奖励列表
         """
@@ -493,9 +494,9 @@ class MCTS_Reasoner:
                 'compared_reward': 0.0
             }
         
-        # 第一阶段：如果rollout_signal为True，先执行所有节点的rollout路径生成
+        # 第一阶段：如果rollout_weight != 0，先执行所有节点的rollout路径生成
         rollout_paths_results = {}
-        if rollout_signal:
+        if self.rollout_weight != 0:
             test_out("rollout_phase", "Starting rollout paths generation phase", self.case_idx, self.dataset_name)
             
             # 为所有节点创建rollout路径生成任务（对终止节点直接使用full_context）
@@ -525,9 +526,10 @@ class MCTS_Reasoner:
         # 第二阶段：创建所有评估任务（包括rollout奖励评估、process评估、pairwise评估）
         all_tasks = []
         task_mapping = {}  # 用于映射任务到节点和奖励类型
+
         
         # 1. 创建process评估任务
-        if process_signal:
+        if self.process_weight != 0:
             for node in new_nodes:
                 process_task = self._process_evaluation(node, node.full_context, node.state)
                 all_tasks.append(process_task)
@@ -538,12 +540,12 @@ class MCTS_Reasoner:
                 }
         
         # 2. 创建rollout奖励评估任务（基于第一阶段生成的路径）
-        if rollout_signal:
+        if self.rollout_weight != 0:
             for node in new_nodes:
                 full_reasoning_paths = rollout_paths_results[node.coordinates]
                 # 为每个路径创建奖励评估任务
                 for rollout_idx, full_reasoning_path in enumerate(full_reasoning_paths):
-                    rollout_reward_task = self._reward_rollout(node, full_reasoning_path, rollout_idx)
+                    rollout_reward_task = self._rollout_evaluation(node, full_reasoning_path, rollout_idx)
                     all_tasks.append(rollout_reward_task)
                     task_mapping[rollout_reward_task] = {
                         'node': node,
@@ -554,7 +556,7 @@ class MCTS_Reasoner:
                     }
         
         # 3. 创建pairwise评估任务
-        if pair_signal and len(new_nodes) > 1:
+        if self.pairwise_weight != 0 and len(new_nodes) > 1:
             pairwise_task = self._pairwise_evaluation(new_nodes)
             all_tasks.append(pairwise_task)
             task_mapping[pairwise_task] = {
@@ -618,7 +620,7 @@ class MCTS_Reasoner:
                         })
             
             # 计算每个节点的平均rollout奖励
-            if rollout_signal:
+            if self.rollout_weight != 0:
                 for node in new_nodes:
                     coords = node.coordinates
                     if 'rollout_rewards' in node_rewards[coords]:
@@ -651,31 +653,7 @@ class MCTS_Reasoner:
             compared_reward = node_rewards[coords]['compared_reward']
             
             # 加权计算最终奖励
-            # 计算 process 和 compared 部分的平均值（当两者都存在时除以2）
-            process_compared_count = 0
-            if process_signal:
-                process_compared_count += 1
-            if pair_signal:
-                process_compared_count += 1
-                
-            if process_compared_count > 0:
-                process_compared_avg = (process_reward + compared_reward) / process_compared_count
-            else:
-                process_compared_avg = 0.0
-            
-            # 计算最终奖励
-            if rollout_signal and (process_signal or pair_signal):
-                # 使用加权公式
-                final_reward = self.balance_beta * process_compared_avg + (1 - self.balance_beta) * rollout_reward
-            elif rollout_signal:
-                # 只有 rollout 信号
-                final_reward = rollout_reward
-            elif process_signal or pair_signal:
-                # 只有 process 和/或 pair 信号
-                final_reward = process_reward + compared_reward
-            else:
-                # 所有信号都关闭
-                final_reward = 0.0
+            final_reward = self.rollout_weight * rollout_reward + self.process_weight * process_reward + self.pairwise_weight * compared_reward
             
             test_out("final_reward", f"Node {coords}: final_reward={final_reward:.6f} (process={process_reward:.6f}, rollout={rollout_reward:.6f}, compared={compared_reward:.6f})", 
                     self.case_idx, self.dataset_name)
@@ -720,7 +698,7 @@ class MCTS_Reasoner:
             test_out("rollout_response:", rollout_response, self.case_idx, self.dataset_name)
         return full_reasoning_paths
 
-    async def _reward_rollout(self, node: ReasoningNode, full_reasoning_path: str, rollout_idx: int):
+    async def _rollout_evaluation(self, node: ReasoningNode, full_reasoning_path: str, rollout_idx: int):
         rollout_key = f"{node.coordinates}_rollout_{rollout_idx+1}"
         rollout_reward, reward_prompt, reward_response = await self.reward_model.evaluate(
             full_reasoning_path, 
@@ -1122,14 +1100,14 @@ async def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name", type=str, default="amc23", help="Name of the dataset") 
-    parser.add_argument("--model", type=str, default="../llama3/models/Meta-Llama-3.1-8B-Instruct", 
+    parser.add_argument("--model", type=str, default="../models/Meta-Llama-3.1-8B-Instruct", 
                        help="模型名称或路径。对于aihub模式，使用模型名称（如qwen-max）；对于transformer和vllm模式，使用模型路径")
-    parser.add_argument("--case_start", type=int, default=1, help="Start index of cases")
-    parser.add_argument("--case_end", type=int, default=40, help="End index of cases")
+    parser.add_argument("--case_start", type=int, default=10, help="Start index of cases")
+    parser.add_argument("--case_end", type=int, default=10, help="End index of cases")
     parser.add_argument("--num_iterations", type=int, default=15, help="Number of MCTS iterations")
     parser.add_argument("--branch_factor", type=int, default=3, 
                        help="Branch factor for MCTS expansion")
-    parser.add_argument("--branch_factor_init", type=int, default=3,
+    parser.add_argument("--branch_factor_init", type=int, default=4,
                        help="Branch factor for initial step generation")
     parser.add_argument("--rollout_num", type=int, default=3, help="Number of rollouts")
     parser.add_argument("--show_runtime", action="store_true", default=True, help="是否显示运行时间")
@@ -1143,12 +1121,12 @@ async def main():
                        help="Maximum depth of the MCTS tree")
     parser.add_argument("--balance_beta", type=float, default=0.65,
                        help="过程奖励和rollout奖励的加权系数 (0-1)")
-    parser.add_argument("--pair_signal", type=bool, default=True,
-                       help="是否打开对比奖励信号")
-    parser.add_argument("--process_signal", type=bool, default=False,
-                       help="是否打开过程评估信号")
-    parser.add_argument("--rollout_signal", type=bool, default=True,
-                       help="是否打开rollout模拟评估信号")
+    parser.add_argument("--pairwise_weight", type=float, default=0.3,
+                       help="对比奖励信号的权重")
+    parser.add_argument("--process_weight", type=float, default=0.3,
+                       help="过程评估信号的权重")
+    parser.add_argument("--rollout_weight", type=float, default=0.3,
+                       help="rollout模拟评估信号的权重")
     args = parser.parse_args()
     
     # 设置全局args引用
@@ -1168,9 +1146,9 @@ async def main():
         "run_mode": args.run_mode,
         "max_depth": args.max_depth,
         "balance_beta": args.balance_beta,
-        "pair_signal": args.pair_signal,
-        "process_signal": args.process_signal,
-        "rollout_signal": args.rollout_signal,
+        "pairwise_weight": args.pairwise_weight,
+        "process_weight": args.process_weight,
+        "rollout_weight": args.rollout_weight,
     }
     
     # 统计模型加载时间
@@ -1243,9 +1221,9 @@ async def main():
             "run_mode": args.run_mode,
             "max_depth": args.max_depth,
             "balance_beta": args.balance_beta,
-            "pair_signal": args.pair_signal,
-            "process_signal": args.process_signal,
-            "rollout_signal": args.rollout_signal
+            "pairwise_weight": args.pairwise_weight,
+            "process_weight": args.process_weight,
+            "rollout_weight": args.rollout_weight
         }
         
         # 构建超参数输出字符串
@@ -1260,6 +1238,7 @@ async def main():
         test_out("question", f"Question: {case['question']}", case_idx + 1, args.dataset_name)
         test_out("ground_truth", f"Ground Truth Answer: {case['answer']}", case_idx + 1, args.dataset_name)
         test_out("separator", '*'*100, case_idx + 1, args.dataset_name)
+
         
         reasoner = MCTS_Reasoner(
             question=case['question'],
@@ -1279,16 +1258,15 @@ async def main():
             branch_factor=args.branch_factor,   
             branch_factor_init=args.branch_factor_init,
             balance_beta=args.balance_beta,
-            pair_signal=args.pair_signal,
-            process_signal=args.process_signal,
-            rollout_signal=args.rollout_signal
+            pairwise_weight=args.pairwise_weight,
+            process_weight=args.process_weight,
+            rollout_weight=args.rollout_weight
         )
         
         try:
             # 异步调用search方法
             reasoning_path = await reasoner.search(
-                num_iterations=args.num_iterations, 
-                branch_factor=args.branch_factor
+                num_iterations=args.num_iterations
             )
             
             test_out("reasoning_path", "\nReasoning Path:", case_idx + 1, args.dataset_name)
@@ -1410,5 +1388,5 @@ def run_main():
 
 if __name__ == "__main__":
     # 限制只使用显卡x
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     run_main()

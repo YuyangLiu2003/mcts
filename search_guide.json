@@ -8,12 +8,12 @@
         "reward_objectives": "1. Does the solution violate any known conditions\n2. Is the answer correct? (most important). If there is no definite answer, give a low score.\n3. Are there any obvious errors or format disorder",
         "answer_restrictions": "1. The answer must be in the format of a number\n2. The answer must be a valid number"
     },
-    "blocks_world": {
-        "idea_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
+    "GPQA-Diamond": {
+        "idea_guidance": "Consider multiple steps to solve the problem.",
         "expand_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
         "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
-        "pairwise_criterions": "1. Is the solution more reliable than the previous one\n2. Is the solution more accurate than the previous one",
-        "reward_objectives": "1. Does the solution violate any known conditions\n2. Is the answer correct? (most important). If there is no definite answer, give a low score.\n3. Are there any obvious errors or format disorder",
-        "answer_restrictions": "1. The answer must be in the format of a number\n2. The answer must be a valid number"
+        "pairwise_criterions": "1. Is the solution more reliable than the previous one?\n2. Is the solution more helpful to solve the problem than the previous one?",
+        "reward_objectives": "1. Does the solution violate any known conditions\n2. Is the answer correct? (most important). If there is no definite answer, give a low score.\n3. The answer must be a choice from A, B, C, D",
+        "answer_restrictions": "1. The answer must be a choice from A, B, C, D, like \\boxed{A, B, C, D}\n2. If the answer does not conform to any of the items A, B, C, or D, select the most reasonable one based on the question and the solution."
     }
 }

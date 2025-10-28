@@ -2,14 +2,16 @@
 
 # 这个脚本用于运行MCTS_reasoning.py，实现基于蒙特卡洛树搜索的推理
 # 指定显卡
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=7
 # 设置默认参数
-DATASET="math500"          # 数据集名称，可选：amc23, aime2024等
-# MODEL="../llama3/models/Qwen2.5-7B-Instruct"  # 模型路径或名称
-MODEL="../models/Meta-Llama-3.1-8B-Instruct"  # 模型路径或名称
+DATASET="GPQA-Diamond"          # 数据集名称，可选：amc23, aime2024等
+#MODEL="../models/Qwen2.5-7B-Instruct"  # 模型路径或名称
+#MODEL="../models/Meta-Llama-3.1-8B-Instruct"  # 模型路径或名称
+MODEL="../models/Qwen3-8B"
 CASE_START=1           # 起始案例索引
-CASE_END=500            # 结束案例索引
+CASE_END=198            # 结束案例索引
 ITERATIONS=15           # MCTS迭代次数
+EXPLORATION_CONSTANT=5.5 # 探索常量，用于UCT公式
 BRANCH_FACTOR_INIT=3    # 初始步骤生成的分支因子
 BRANCH_FACTOR=3         # MCTS扩展的分支因子
 ROLLOUT_NUM=3           # 展开次数
@@ -17,8 +19,8 @@ MAX_DEPTH=10            # MCTS树的最大深度
 BALANCE_BETA=0.65       # 过程奖励和rollout奖励的加权系数 (0-1)
 RUN_MODE="async_vllm"   # 运行模式：aihub, transformer, vllm, async_vllm, debug
 PAIRWISE_WEIGHT=0.5      # 对比奖励信号的权重
-PROCESS_WEIGHT=0.2       # 过程评估信号的权重
-ROLLOUT_WEIGHT=0.3       # rollout模拟评估信号的权重
+PROCESS_WEIGHT=0.1       # 过程评估信号的权重
+ROLLOUT_WEIGHT=0.4       # rollout模拟评估信号的权重
 
 
 
@@ -43,6 +45,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --iterations)
       ITERATIONS="$2"
+      shift 2
+      ;;
+    --exploration_constant)
+      EXPLORATION_CONSTANT="$2"
       shift 2
       ;;
     --branch_factor)
@@ -88,7 +94,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --model MODEL                模型路径或名称 (默认: /root/autodl-tmp/models/Meta-Llama-3.1-8B-Instruct)"
       echo "  --case_start START           起始案例索引 (默认: 1)"
       echo "  --case_end END               结束案例索引 (默认: 10)"
-      echo "  --iterations NUM             MCTS迭代次数 (默认: 10)"
+      echo "  --iterations NUM             MCTS迭代次数 (默认: 15)"
+      echo "  --exploration_constant NUM   探索常量，用于UCT公式 (默认: 3)"
       echo "  --branch_factor NUM          MCTS扩展的分支因子 (默认: 3)"
       echo "  --branch_factor_init NUM     初始步骤生成的分支因子 (默认: 4)"
       echo "  --rollout_num NUM            展开次数 (默认: 2)"
@@ -115,6 +122,7 @@ echo "数据集: $DATASET"
 echo "模型: $MODEL"
 echo "案例范围: $CASE_START-$CASE_END"
 echo "迭代次数: $ITERATIONS"
+echo "探索常量: $EXPLORATION_CONSTANT"
 echo "分支因子: $BRANCH_FACTOR"
 echo "初始分支因子: $BRANCH_FACTOR_INIT"
 echo "展开次数: $ROLLOUT_NUM"
@@ -139,6 +147,7 @@ cd /data/wuyang/MCTS_Reasoning && python MCTS_reasoning.py \
   --case_start "$CASE_START" \
   --case_end "$CASE_END" \
   --num_iterations "$ITERATIONS" \
+  --exploration_constant "$EXPLORATION_CONSTANT" \
   --branch_factor "$BRANCH_FACTOR" \
   --branch_factor_init "$BRANCH_FACTOR_INIT" \
   --rollout_num "$ROLLOUT_NUM" \

@@ -158,7 +158,7 @@ class ReasoningNode:
 class MCTS_Reasoner:
     def __init__(self, question: str, reward_model: Any, process_reward_model: Any, pairwise_reward_model: Any,
                  prompt_handler: PromptHandler, response_handler: ResponseHandler, search_guide_handler: SearchGuideHandler,
-                 llm_client: Any, case_idx: int, dataset_name: str,
+                 llm_client: Any, case_idx: int, dataset_name: str, ground_truth: Any = None,
                  rollout_num: int = 1, exploration_constant: float = 3, 
                  show_runtime: bool = True, verbose: bool = True,
                  max_depth: int = 5, branch_factor: int = 3, branch_factor_init: Any = None,
@@ -177,11 +177,12 @@ class MCTS_Reasoner:
         self.dataset_name = dataset_name
         self.show_runtime = show_runtime
         self.verbose = verbose
-        self.tree_log = {"case_idx": case_idx, "nodes": {}, "rollouts": {}}
+        self.tree_log = {"case_idx": case_idx, "hyperparamters": {}, "nodes": {}, "rollouts": {}}
+        self.question = question
+        self.ground_truth = ground_truth
         
         # 用户手动配置参数
         self.exploration_constant = exploration_constant
-        self.question = question
         self.rollout_num = rollout_num
         self.max_depth = max_depth
         self.branch_factor = branch_factor
@@ -192,10 +193,6 @@ class MCTS_Reasoner:
         self.rollout_weight = rollout_weight  # 路径奖励权重
         self.process_weight = process_weight  # 过程奖励权重
         self.pairwise_weight = pairwise_weight  # 对比奖励权重
-        # 使用权重替代信号开关
-        print("rollout_weight: {}".format(self.rollout_weight))
-        print("process_weight: {}".format(self.process_weight))
-        print("pairwise_weight: {}".format(self.pairwise_weight))
         
         # 从Search_Guide中加载各种引导信息
         self.search_guide_handler = search_guide_handler
@@ -250,13 +247,11 @@ class MCTS_Reasoner:
             "is_final": False,
             "full_context": root.full_context
         }
-        self.save_tree_log()
+        #self.save_tree_log()
         
         # 使用initial_step模板进行第一次展开，使用branch_factor_init
         prompt = self.prompt_handler.get_init_prompt(self.question)
-        print("haha, init factor is: ", self.branch_factor_init)
         responses = await self.llm_client.batch_generate(prompt, n=self.branch_factor_init, stop_stage="initial_step")
-        print("responses have: ", len(responses))
         for i, response in enumerate(responses):  # 修复：添加enumerate获取索引
             initial_step = self.response_handler.get_expand_step_init(response)
             test_out("initial_step", initial_step, self.case_idx, self.dataset_name)
@@ -290,7 +285,6 @@ class MCTS_Reasoner:
                 "is_final": new_node.is_final,
                 "full_context": new_node.full_context
             }
-            self.save_tree_log()
 
         # 执行MCTS迭代
         # print('*'*30+"searching now"+'*'*30)
@@ -314,10 +308,20 @@ class MCTS_Reasoner:
                 self._backpropagate(node, reward)
 
         # 选择最优路径 - 调用新的pick_final_answer方法
-        best_path, best_solution = self._pick_final_answer(root)
+        best_path, best_solution, answer_frequency = self._pick_final_answer(root)
+        print("best_path:", ''.join(best_path))
+        print("best_solution:", best_solution)
         
         # 使用最佳推理路径生成最终答案
         final_answer = await self._output_best_answer(best_solution)
+
+        self.tree_log['final_results'] = {
+            "ground_truth": self.ground_truth,
+            "final_answer": final_answer,
+            "answer_frequency": answer_frequency,
+            "best_path": best_path,
+        }
+        self.save_tree_log()
 
         end_time = time.time()
         runtime = end_time - start_time
@@ -326,7 +330,7 @@ class MCTS_Reasoner:
             output = f"\n{'*'*60}\nRuntime: {runtime:.2f} seconds\n{'*'*60}"
             test_out("Runtime", output, self.case_idx, self.dataset_name)
             
-        return best_path
+        return best_path, final_answer
 
     def _select(self, node: ReasoningNode) -> ReasoningNode:
         """使用UCT公式选择节点，但不选择终止节点进行扩展"""
@@ -471,7 +475,6 @@ class MCTS_Reasoner:
             "is_final": new_node.is_final,
             "full_path": new_node.full_context  # 记录完整上下文
         }
-        self.save_tree_log()
         return new_node
         
     async def _async_simulate(self, new_nodes: List[ReasoningNode]) -> List[float]:
@@ -712,7 +715,6 @@ class MCTS_Reasoner:
             "rollout_reward": rollout_reward,
             "reward_response": reward_response,
         }
-        self.save_tree_log()
         return rollout_reward, reward_prompt, reward_response
 
     async def _process_evaluation(self, node: ReasoningNode, previous_steps: str, current_step: str):
@@ -785,7 +787,6 @@ class MCTS_Reasoner:
             "max_depth_reached": True,
             "full_context": new_node.full_context
         }
-        self.save_tree_log()
         
         return [new_node]
 
@@ -812,17 +813,6 @@ class MCTS_Reasoner:
         test_out("terminal_reward_prompt", reward_prompt, self.case_idx, self.dataset_name)
         test_out("terminal_reward_response", reward_response, self.case_idx, self.dataset_name)
         test_out("terminal_reward", f"{final_reward:.6f}", self.case_idx, self.dataset_name)
-        
-        # 记录终止节点评估信息到日志
-        final_key = f"{node.coordinates}_final_evaluation"
-        self.tree_log["final_evaluations"] = self.tree_log.get("final_evaluations", {})
-        self.tree_log["final_evaluations"][final_key] = {
-            "full_reasoning_path": full_reasoning_path,
-            "terminal_reward": final_reward,
-            "evaluation_prompt": reward_prompt,
-            "evaluation_response": reward_response
-        }
-        self.save_tree_log()
         
         return final_reward
 
@@ -851,8 +841,9 @@ class MCTS_Reasoner:
             # 如果没有找到任何叶子节点，返回访问次数最多的子节点路径
             best_child = max(root.children, key=lambda c: c.visits)
             best_path = best_child.reasoning_path
+            best_solution = best_child.full_context
             test_out("no_leaf_nodes_found", f"Using best child with most visits: {best_child.coordinates}", self.case_idx, self.dataset_name)
-            return best_path
+            return best_path, best_solution, {}
         
         # 计算答案频率作为置信度得分
         answer_frequency = self._calculate_answer_frequency()
@@ -925,7 +916,7 @@ class MCTS_Reasoner:
         test_out("final_path_selection", f"Selected best leaf: {best_leaf_coords} with weighted_value={best_weighted_value:.6f}", self.case_idx, self.dataset_name)
         test_out("final_path_details", f"Best path coordinates: {best_leaf_coords}, path length: {len(best_path)}", self.case_idx, self.dataset_name)
         
-        return best_path, best_solution
+        return best_path, best_solution, answer_frequency
 
     def _extract_answer_from_response(self, response: str) -> str:
         """从响应中提取最终答案"""
@@ -992,7 +983,7 @@ class MCTS_Reasoner:
         使用最佳推理路径生成最终答案
         
         Args:
-            best_solution: 最佳推理路径列表
+            best_solution: 最佳推理路径字符串
         Returns:
             生成的最终答案字符串
         """
@@ -1028,61 +1019,26 @@ class MCTS_Reasoner:
         tree_data = {
             "case_idx": self.case_idx,
             "dataset_name": self.dataset_name,
+            "question": self.question,
+            "final_results": self.tree_log["final_results"],
+            "hyperparameters": {
+                "exploration_constant": self.exploration_constant,
+                "rollout_weight": self.rollout_weight,
+                "process_weight": self.process_weight,
+                "pairwise_weight": self.pairwise_weight,
+                "rollout_num": self.rollout_num,
+                "max_depth": self.max_depth,
+                "branch_factor": self.branch_factor,
+                "branch_factor_init": self.branch_factor_init,
+                "balance_beta": self.balance_beta,
+            },
             "nodes": self.tree_log["nodes"],
             "rollouts": self.tree_log["rollouts"],
-            "final_evaluations": self.tree_log.get("final_evaluations", {})  # 新增：保存终止节点评估信息
         }
         
         # 保存到文件
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(tree_data, f, ensure_ascii=False, indent=2)
-
-    def save_mcts_tree(self):
-        """保存蒙特卡洛树的完整信息到本地文件"""
-        # 使用新格式的目录名，从全局参数获取case_start和case_end
-        from log_func import get_global_args
-        args = get_global_args()
-        log_dir = os.path.join("logs", f"{self.dataset_name}_{timestamp}_{args.case_start}_{args.case_end}")
-        os.makedirs(log_dir, exist_ok=True)
-        
-        # 构建文件名，每个case只使用一个文件
-        filename = os.path.join(log_dir, f"mcts_tree_{self.dataset_name}_case_{self.case_idx}.json")
-        
-        # 构建树的信息字典
-        tree_info = {
-            "case_idx": self.case_idx,
-            "dataset_name": self.dataset_name,
-            "question": self.question,
-            "nodes": {}
-        }
-        
-        def collect_node_info(node):
-            """递归收集节点信息"""
-            node_info = {
-                "state": node.state,
-                "response": node.response,
-                "visits": node.visits,
-                "value": node.value,
-                "is_final": node.is_final,
-                "coordinates": node.coordinates,
-                "children": []
-            }
-            
-            # 收集子节点信息
-            for child in node.children:
-                child_coords = child.coordinates
-                node_info["children"].append(child_coords)
-                collect_node_info(child)
-            
-            # 将节点信息添加到树信息中
-            tree_info["nodes"][node.coordinates] = node_info
-        
-        # 从根节点开始收集信息
-        collect_node_info(self.root)
-        
-        # 保存到JSON文件
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(tree_info, f, ensure_ascii=False, indent=2)
 
 async def main():
     global args
@@ -1106,6 +1062,7 @@ async def main():
     parser.add_argument("--case_start", type=int, default=1, help="Start index of cases")
     parser.add_argument("--case_end", type=int, default=40, help="End index of cases")
     parser.add_argument("--num_iterations", type=int, default=15, help="Number of MCTS iterations")
+    parser.add_argument("--exploration_constant", type=float, default=1.41, help="Exploration constant for UCT formula")
     parser.add_argument("--branch_factor", type=int, default=3, 
                        help="Branch factor for MCTS expansion")
     parser.add_argument("--branch_factor_init", type=int, default=4,
@@ -1141,6 +1098,7 @@ async def main():
         "case_start": args.case_start,
         "case_end": args.case_end,
         "num_iterations": args.num_iterations,
+        "exploration_constant": args.exploration_constant,
         "branch_factor": args.branch_factor,
         "branch_factor_init": args.branch_factor_init,
         "rollout_num": args.rollout_num,
@@ -1180,12 +1138,11 @@ async def main():
         test_out("error", "Failed to load dataset", args.case_start, args.dataset_name)
         return
     
-    # 初始化其他组件，SearchGuide只在MCTS内部使用
     # 修复：确保tokenizer是实际对象而不是协程
     tokenizer = llm.tokenizer
     if asyncio.iscoroutine(tokenizer):
         tokenizer = await tokenizer
-    
+
     prompt_handler = PromptHandler(tokenizer=tokenizer)
     response_handler = ResponseHandler()
     search_guide_handler = SearchGuideHandler(dataset_name=args.dataset_name)
@@ -1214,6 +1171,7 @@ async def main():
             "case_start": args.case_start,
             "case_end": args.case_end,
             "num_iterations": args.num_iterations,
+            "exploration_constant": args.exploration_constant,
             "branch_factor": args.branch_factor,
             "branch_factor_init": args.branch_factor_init,
             "rollout_num": args.rollout_num,
@@ -1244,6 +1202,7 @@ async def main():
         
         reasoner = MCTS_Reasoner(
             question=case['question'],
+            ground_truth=case['answer'],
             reward_model=reward_model,
             process_reward_model=process_reward_model,
             pairwise_reward_model=pairwise_reward_model,
@@ -1253,6 +1212,7 @@ async def main():
             llm_client=llm,
             case_idx=case_idx + 1,
             dataset_name=args.dataset_name,
+            exploration_constant=args.exploration_constant,
             rollout_num=args.rollout_num,
             show_runtime=args.show_runtime,
             verbose=args.verbose,
@@ -1267,7 +1227,7 @@ async def main():
         
         try:
             # 异步调用search方法
-            reasoning_path = await reasoner.search(
+            reasoning_path, final_answer = await reasoner.search(
                 num_iterations=args.num_iterations
             )
             
@@ -1275,7 +1235,7 @@ async def main():
             for step in reasoning_path:
                 test_out("reasoning_step", f"- {step}", case_idx + 1, args.dataset_name)
             
-            reasoner.save_tree_log()
+            #reasoner.save_tree_log()
                 
             
             # 记录案例信息到summary
@@ -1286,10 +1246,11 @@ async def main():
                 "case_id": case_idx + 1,
                 "question": case['question'],
                 "ground_truth": case['answer'],
+                "final_answer": final_answer,
                 "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_start_time)),
                 "end_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_end_time)),
                 "duration_seconds": case_duration,
-                "reasoning_path": reasoning_path
+                "reasoning_path": reasoning_path,
             }
             summary_data["cases"].append(case_info)
 
@@ -1305,6 +1266,7 @@ async def main():
                 "case_id": case_idx + 1,
                 "question": case['question'],
                 "ground_truth": case['answer'],
+                "final_answer": "Error",
                 "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_start_time)),
                 "end_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(case_end_time)),
                 "duration_seconds": case_duration,

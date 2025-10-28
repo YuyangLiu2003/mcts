@@ -118,7 +118,7 @@ class use_AiHubMix:
             return None
 
 class use_vLLM:
-    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=4096, trust_remote_code=True,
+    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=8192, trust_remote_code=True,
                  tensor_parallel_size=1, use_stop=False):
         """
         初始化vLLM模型
@@ -261,7 +261,7 @@ class use_vLLM:
         return texts
 
 class use_async_vLLM:
-    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=4096, 
+    def __init__(self, model_name='models/Meta-Llama-3.1-8B-Instruct', device="cuda", max_model_len=8192, 
                  trust_remote_code=True, tensor_parallel_size=None, gpu_memory_utilization=0.9, max_num_seqs=256, use_stop=False):
         """
         初始化异步vLLM模型引擎

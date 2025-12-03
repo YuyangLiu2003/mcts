@@ -1,7 +1,7 @@
 import re
 import asyncio
 import numpy as np
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Tuple
 from stop_sequences import get_stopping_criteria
 from text_handler import PromptHandler, ResponseHandler
 from log_func import test_out
@@ -92,15 +92,16 @@ class PairwiseRewardModel:
         n = len(new_nodes)
         
         for i in range(n):
-            for j in range(i + 1, n):
-                pair = {
-                    "stepA": new_nodes[i].state,
-                    "stepB": new_nodes[j].state,
-                    "score": 0,
-                    "nodeA_idx": i,
-                    "nodeB_idx": j
-                }
-                pairs.append(pair)
+            for j in range(n):
+                if i != j:  # 排除自身与自身的配对
+                    pair = {
+                        "stepA": new_nodes[i].state,
+                        "stepB": new_nodes[j].state,
+                        "score": 0,
+                        "nodeA_idx": i,
+                        "nodeB_idx": j
+                    }
+                    pairs.append(pair)
         
         return pairs
 
@@ -123,92 +124,98 @@ class PairwiseRewardModel:
         pair["response"] = response
         return pair
 
-    def _get_bradley_terry_score(self, pairs: List[Dict[str, Any]], num_nodes: int) -> List[float]:
-        """
-        使用考虑优势程度的Bradley-Terry模型计算每个节点的优势分数
-        最终结果映射到0-10范围
+    def _get_bradley_terry_score(self, pairs: List[Dict[str, Any]], num_nodes: int, 
+                                k: float = 0.8, iter_mean: float = 6, 
+                                final_scale: float = 3.8, 
+                                score_range: Tuple[float, float] = (0, 10)) -> List[float]:
+        """Compute ln(r) values with given comparison data using numpy for efficiency
         
         Args:
-            pairs: 比较对列表，包含优势优势程度分数(-5到+5)
-            num_nodes: 节点总数
+            pairs: List of dictionaries, each containing nodeA_idx, nodeB_idx, and score
+            num_nodes: Number of nodes/players
+            k: Sensitivity parameter for pij to score changes
+            iter_mean: Mean value for iteration scaling
+            final_scale: Scaling factor for final score
+            score_range: Tuple of (min_score, max_score) for clipping final scores
+            
         Returns:
-            每个节点的优势分数列表(0-10)
+            List of node advantage scores
         """
-        # 初始化能力参数 r_i > 0
-        r = np.full(num_nodes, 1e-5, dtype=np.float64)  # 初始值设为小正数
-        epsilon = 1e-8  # 收敛阈值
-        max_iterations = 1000  # 最大迭代次数
-        min_r = 1e-10  # 防止r变为0的最小值
+        r = np.ones(num_nodes, dtype=np.float64)
+        min_r = 1e-8
         
-        # 整理比赛数据：记录每个节点的对手和优势程度
-        sum_p = [0.0 for _ in range(num_nodes)]  # 每个节点的获胜概率总和
-        opponents = [[] for _ in range(num_nodes)]  # 每个节点的所有对手
-        pair_weights = [[] for _ in range(num_nodes)]  # 每次比较的权重
+        # Initialize opponents list (keeping list form as each node may have different number of opponents)
+        opponents = [[] for _ in range(num_nodes)]
+        sum_p = np.zeros(num_nodes, dtype=np.float64)
         
+        # Process pair data, build opponents list and sum_p
         for pair in pairs:
-            i = pair["nodeA_idx"]
-            j = pair["nodeB_idx"]
-            score = pair["score"]
+            i = pair.get("nodeA_idx")
+            j = pair.get("nodeB_idx")
+            score = pair.get("score", 0)  # Default to 0 if score not provided
             
-            # 将分数转换为A胜B的概率 (0-1之间)
-            # 分数越高，A胜B的概率越大，但避免极端值0和1
-            p_ij = 0.98 * (score + 5) / 10 + 0.01  # 映射到[0.01, 0.99]区间
-            p_ji = 1.0 - p_ij  # B胜A的概率
-            
-            # 记录对手和对应的权重
-            opponents[i].append(j)
-            opponents[j].append(i)
-            pair_weights[i].append(p_ij)
-            pair_weights[j].append(p_ji)
-            
-            # 累加获胜概率
-            sum_p[i] += p_ij
-            sum_p[j] += p_ji
-        
-        # 牛顿-拉夫森迭代法最大化似然函数
-        for _ in range(max_iterations):
-            r_old = r.copy()
-            
-            # 对每个节点更新参数
-            for i in range(num_nodes):
-                # 计算分母：sum(1/(r_i + r_j)) for all j in opponents of i
-                denominator = 0.0
-                for j in opponents[i]:
-                    denominator += 1.0 / (r[i] + r[j])
+            if i is None or j is None:
+                continue  # Skip invalid pairs
                 
-                # 更新参数，确保不会出现零或负值
+            # Calculate win probabilities
+            # For situations with win/loss scores, use probability of i beating j
+            # as a proxy for "number of wins" in standard BT model
+            p_ij = k * score / 10 + 0.5
+            p_ji = 1.0 - p_ij
+            
+            # Ensure indices are within valid range
+            if i < num_nodes and j < num_nodes:
+                opponents[i].append(j)
+                opponents[j].append(i)
+                sum_p[i] += p_ij
+                sum_p[j] += p_ji
+        
+        max_iterations = 1000
+        epsilon = 1e-8
+        
+        for iteration in range(max_iterations):
+            r_old = r.copy()  # Save current r values for comparison
+            
+            # Update r value for each node
+            for i in range(num_nodes):
+                js = opponents[i]
+                if not js:  # No opponents, denominator is 0
+                    denominator = 0.0
+                else:
+                    # r[i] is current node's r value, r[js] are all opponent j's r values
+                    denominator = np.sum(1.0 / (r[i] + r[js]))
+                
+                # Update r value (when conditions are met)
                 if denominator > 0 and sum_p[i] > 0:
                     new_r = sum_p[i] / denominator
-                    r[i] = max(new_r, min_r)  # 确保不小于最小值
+                    r[i] = max(new_r, min_r)
             
-            # 检查收敛性（参数变化小于阈值）
-            if np.linalg.norm(r - r_old) < epsilon:
+            # Scale r to have mean of iter_mean during iteration to avoid divergence
+            # This doesn't change the ratio of r values
+            r_sum = r.sum()
+            if r_sum > 0:
+                scale_factor = iter_mean * num_nodes / r_sum
+                r *= scale_factor
+                # Ensure not less than minimum threshold
+                r = np.maximum(r, min_r)
+            
+            # Calculate convergence difference (Euclidean distance)
+            diff = np.linalg.norm(r - r_old)
+            if diff < epsilon:
                 break
         
-        # 将能力参数转换为0-10范围的分数
-        try:
-            # 1. 先取对数将乘性模型转为加性模型
-            log_r = np.log(np.maximum(r, min_r))  # 确保安全取对数
-            
-            # 2. 标准化到[0, 1]区间
-            min_log = np.min(log_r)
-            max_log = np.max(log_r)
-            log_range = max_log - min_log
-            
-            # 处理所有节点能力相同的特殊情况
-            if log_range < 1e-10:
-                return [5.0] * num_nodes  # 中间值5作为默认
-            
-            # 3. 映射到0-10范围（修改部分）
-            normalized_scores = (log_r - min_log) / log_range
-            node_adv_scores = normalized_scores * 10  # 缩放至0-10
-            
-            return node_adv_scores.tolist()
-            
-        except Exception as e:
-            # 任何计算错误时返回默认分数
-            print(f"计算过程中出现错误: {e}")
-            return [5.0] * num_nodes  # 中间值5作为默认
+        # Convert r values to natural log, as BT model cares about ratio of r values
+        bt_score = np.log(r)
+
+        # Scale to final range
+        final_score = bt_score * final_scale
+        
+        # Clip scores to specified range
+        min_val, max_val = score_range
+        final_score = np.clip(final_score, min_val, max_val)
+        
+        # Convert numpy array to list of floats
+        return final_score.tolist()
 
     async def pairwise_evaluate(self, previous_steps: str, new_nodes: List[Any], process_criterions: str, case_idx: int = None) -> List[float]:
         """

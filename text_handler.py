@@ -68,21 +68,65 @@ class SearchGuideHandler:
         self.guide_config = self._load_guide_config()
 
 class PromptHandler:
-    def __init__(self, template_file: str = "prompt_template_chat.json", tokenizer: Any = None):
+    def __init__(self, template_file: str = "prompt_template_chat.json", tokenizer: Any = None, 
+                 model_name: str = "", thinking_mode: bool = False):
         """
         初始化PromptHandler，负责管理和加载prompt模板
         
         Args:
             template_file: prompt模板文件的路径
+            tokenizer: tokenizer对象
+            model_name: 模型名称，用于检查thinking属性
+            thinking_mode: thinking模式开关
         """
         self.template_file = template_file
         self.templates = self._load_templates()
         self.tokenizer = tokenizer
+        self.model_name = model_name
+        self.thinking_mode = thinking_mode
+        self.thinking_attr_dict = {'Qwen3-8B': "enable_thinking"}  # 可以根据需要扩展
+        self.thinking_attr_name = None
+        
+        # 检查是否支持thinking模式
+        print("arg.model", self.model_name)
+        if model_name and (model_name in self.thinking_attr_dict.keys()):
+            attr_name = self.thinking_attr_dict[model_name]
+            self.thinking_attr_name = attr_name
+            print(f"模型 {model_name} 支持thinking模式，属性名为: {attr_name}")
+        elif model_name:
+            pass
+            #print(f"模型 {model_name} 不在thinking_attr_dict中，将不会添加thinking参数")
     
     def _load_templates(self) -> Dict[str, Dict[str, str]]:
         """从JSON文件加载模板"""
         with open(self.template_file, 'r', encoding='utf-8') as f:
             return json.load(f)
+    
+    def _apply_chat_template(self, messages: List[Dict[str, str]]) -> str:
+        """
+        统一的apply_chat_template方法，处理thinking模式
+        
+        Args:
+            messages: 消息列表
+        Returns:
+            处理后的prompt字符串
+        """
+        # 如果模型支持thinking属性，总是添加该参数，值为thinking_mode
+        if self.thinking_attr_name:
+            # 使用正确的参数传递方式
+            return self.tokenizer.apply_chat_template(
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True,
+                **{self.thinking_attr_name: self.thinking_mode}
+            )
+        else:
+            # 正常调用，不添加thinking参数
+            return self.tokenizer.apply_chat_template(
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True
+            )
     
     def get_init_prompt(self, question: str) -> str:
         """
@@ -104,7 +148,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
         
         # 替换用户问题占位符
@@ -134,7 +178,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
         
         # 替换占位符
@@ -166,7 +210,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
         
         # 替换占位符
@@ -188,7 +232,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
         
         # 替换占位符
@@ -211,7 +255,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
         
         prompt = prompt.replace("[full solution]", full_solution)
@@ -233,7 +277,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
 
         prompt = prompt.replace("[previous steps]", previous_steps)
@@ -263,7 +307,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
 
         # 替换占位符
@@ -296,7 +340,7 @@ class PromptHandler:
 
         messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}]
-        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        prompt = self._apply_chat_template(messages)
         prompt = "".join([prefix, prompt, suffix])
         
         # 替换占位符
@@ -417,7 +461,7 @@ class ResponseHandler:
                 score = int(score_match.group(1))
                 score = max(0, min(10, score))
             else:
-                print(f"Warning: Could not extract rollout score from response: {response}")
+                #print(f"Warning: Could not extract rollout score from response: {response}")
                 score = 5.0
         except Exception as e:
             print(f"Error evaluating response: {e}")
@@ -434,7 +478,7 @@ class ResponseHandler:
                 score = int(score_match.group(1))
                 score = max(0, min(10, score))
             else:
-                print(f"Warning: Could not extract process score from response: {response}")
+                #print(f"Warning: Could not extract process score from response: {response}")
                 score = 5.0
         except Exception as e:
             print(f"Error evaluating process response: {e}")

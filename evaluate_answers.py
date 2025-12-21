@@ -245,7 +245,7 @@ def load_dataset(dataset_path):
             
         for item in dataset:
             case_id = item.get('index') + 1  # 索引从0开始，但case_id从1开始
-            answer = item.get('answer', '').strip()
+            answer = str(item.get('answer', '')).strip()
             question = item.get('question', '').strip()
             correct_data[case_id] = {
                 'answer': answer,

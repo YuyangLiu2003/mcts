@@ -28,7 +28,8 @@ class RewardModel:
         prompt = self.prompt_handler.get_reward_prompt(full_solution, objectives)
         response = await self.llm_client.generate(prompt,
                                                 stop_stage='reward',
-                                                skip_special_tokens=False)
+                                                skip_special_tokens=False,
+                                                max_tokens=2048)
         score = self.response_handler.parse_reward_response(response)
         if return_response:
             return score, prompt, response

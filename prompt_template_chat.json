@@ -32,7 +32,7 @@
   "reward_evaluation":{
     "prefix": "[full solution]\n",
     "system_prompt": "",
-    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10 (0 means the solution is extremely poor, 5 means average, 10 means the solution is perfectly done). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 9)\n</evaluation>\n",
+    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10 (0 means the solution is extremely poor, 5 means average, 10 means the solution is perfectly done). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 10)\n</evaluation>\n",
     "suffix": "<evaluation>\n[Analysis]:"
   },
   "pair_evaluation":{

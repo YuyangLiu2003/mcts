@@ -220,7 +220,7 @@ class MCTS_Reasoner:
             return False
         
         # 检查是否包含 \boxed{xxx} 或 </think>
-        return r'\boxed{' in response or '</think>' in response
+        return r'\boxed{' in response
 
     async def search(self, num_iterations: int = 20) -> str:
         """
@@ -251,7 +251,8 @@ class MCTS_Reasoner:
         
         # 使用initial_step模板进行第一次展开，使用branch_factor_init
         prompt = self.prompt_handler.get_init_prompt(self.question)
-        responses = await self.llm_client.batch_generate(prompt, n=self.branch_factor_init, stop_stage="initial_step")
+        # 高温度采样使得模型有一些变数
+        responses = await self.llm_client.generate(prompt, n=self.branch_factor_init, stop_stage="initial_step", seed=None, temperature=0.9)
         for i, response in enumerate(responses):  # 修复：添加enumerate获取索引
             initial_step = self.response_handler.get_expand_step_init(response)
             test_out("initial_step", initial_step, self.case_idx, self.dataset_name)
@@ -309,8 +310,8 @@ class MCTS_Reasoner:
 
         # 选择最优路径 - 调用新的pick_final_answer方法
         best_path, best_solution, answer_frequency = self._pick_final_answer(root)
-        print("best_path:", ''.join(best_path))
-        print("best_solution:", best_solution)
+        #print("best_path:", ''.join(best_path))
+        #print("best_solution:", best_solution)
         
         # 使用最佳推理路径生成最终答案
         final_answer = await self._output_best_answer(best_solution)
@@ -392,7 +393,7 @@ class MCTS_Reasoner:
 
         # 使用节点的full_context
         context = chosen_node.full_context
-        test_out("chosen_node_context", context, self.case_idx, self.dataset_name)
+        # test_out("chosen_node_context", context, self.case_idx, self.dataset_name)
 
         # 第一步：生成多个不同的核心想法
         core_ideas = await self._generate_diverse_core_ideas(context, self.branch_factor)
@@ -445,7 +446,7 @@ class MCTS_Reasoner:
         
         # 处理LLM的响应，提取下一步推理内容
         new_step = self.response_handler.get_expand_step(core_idea, expand_response)
-        test_out("new_step", new_step, self.case_idx, self.dataset_name)
+        #test_out("new_step", new_step, self.case_idx, self.dataset_name)
 
         # 创建新的推理节点
         new_node = ReasoningNode(
@@ -693,7 +694,7 @@ class MCTS_Reasoner:
         test_out("rollout_prompt:", rollout_prompt, self.case_idx, self.dataset_name)
         
         # 添加rollout阶段的停止序列
-        rollout_responses = await self.llm_client.batch_generate(rollout_prompt, stop_stage='rollout', n=actual_rollout_num, max_new_tokens=1000)
+        rollout_responses = await self.llm_client.generate(rollout_prompt, stop_stage='rollout', n=actual_rollout_num, max_tokens=1000)
 
         full_reasoning_paths = []
         for rollout_idx, rollout_response in enumerate(rollout_responses):
@@ -737,6 +738,7 @@ class MCTS_Reasoner:
             self.pairwise_criterions,
             self.case_idx
         )
+        print("compared_rewards:", compared_rewards)
         return compared_rewards, pair_details
 
     async def _max_depth_expand(self, node: ReasoningNode) -> List[ReasoningNode]:
@@ -1060,7 +1062,7 @@ async def main():
     parser.add_argument("--model", type=str, default="../models/Meta-Llama-3.1-8B-Instruct", 
                        help="模型名称或路径。对于aihub模式，使用模型名称（如qwen-max）；对于transformer和vllm模式，使用模型路径")
     parser.add_argument("--case_start", type=int, default=1, help="Start index of cases")
-    parser.add_argument("--case_end", type=int, default=40, help="End index of cases")
+    parser.add_argument("--case_end", type=int, default=1, help="End index of cases")
     parser.add_argument("--num_iterations", type=int, default=15, help="Number of MCTS iterations")
     parser.add_argument("--exploration_constant", type=float, default=1.41, help="Exploration constant for UCT formula")
     parser.add_argument("--branch_factor", type=int, default=3, 
@@ -1143,7 +1145,8 @@ async def main():
     if asyncio.iscoroutine(tokenizer):
         tokenizer = await tokenizer
 
-    prompt_handler = PromptHandler(tokenizer=tokenizer)
+    model_name = os.path.basename(args.model)
+    prompt_handler = PromptHandler(tokenizer=tokenizer, model_name=model_name, thinking_mode=False)
     response_handler = ResponseHandler()
     search_guide_handler = SearchGuideHandler(dataset_name=args.dataset_name)
 
@@ -1352,5 +1355,5 @@ def run_main():
 
 if __name__ == "__main__":
     # 限制只使用显卡x
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "7"
     run_main()

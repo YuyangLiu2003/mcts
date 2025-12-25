@@ -3,7 +3,7 @@ import math
 import os
 import time
 import argparse
-from typing import Any, List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional
 from tqdm import tqdm
 
 from stop_sequences import get_stop_sequences
@@ -189,12 +189,10 @@ class MCTS_Reasoner:
         self.branch_factor_init = branch_factor_init if branch_factor_init is not None else branch_factor
         self.balance_beta = balance_beta  # 保留参数以保持向后兼容
         
-        # 新增：各种奖励权重参数
+        # 新增：三个奖励权重参数
         self.rollout_weight = rollout_weight  # 路径奖励权重
         self.process_weight = process_weight  # 过程奖励权重
         self.pairwise_weight = pairwise_weight  # 对比奖励权重
-        self.rollout_sc_weight = 0
-        self.rollout_confidence_weight = 0
         
         # 从Search_Guide中加载各种引导信息
         self.search_guide_handler = search_guide_handler
@@ -224,25 +222,38 @@ class MCTS_Reasoner:
         # 检查是否包含 \boxed{xxx} 或 </think>
         return r'\boxed{' in response
 
-    async def _init_expand(self, root: ReasoningNode) -> List[ReasoningNode]:
+    async def search(self, num_iterations: int = 20) -> str:
         """
-        封装初始扩展逻辑：生成初始prompt，调用LLM，并创建第一层子节点
+        执行MCTS搜索
+        
+        Args:
+            num_iterations: 迭代次数
         """
-        # 使用initial_step模板进行第一次展开
+        start_time = time.time()
+        
+        # 创建根节点
+        root = ReasoningNode(self.question, coordinates="root")
+        self.root = root
+        
+        # 更新根节点的完整上下文
+        root.update_full_context()
+        
+        # 为根节点创建日志记录
+        self.tree_log["nodes"]["root"] = {
+            "state": self.question,
+            "response": None,
+            "visits": 0,
+            "value": 0.0,
+            "is_final": False,
+            "full_context": root.full_context
+        }
+        #self.save_tree_log()
+        
+        # 使用initial_step模板进行第一次展开，使用branch_factor_init
         prompt = self.prompt_handler.get_init_prompt(self.question)
-        
         # 高温度采样使得模型有一些变数
-        responses = await self.llm_client.generate(
-            prompt, 
-            n=self.branch_factor_init, 
-            stop_stage="initial_step", 
-            seed=None, 
-            temperature=0.9
-        )
-        
-        initial_nodes = []
-        
-        for i, response in enumerate(responses):
+        responses = await self.llm_client.generate(prompt, n=self.branch_factor_init, stop_stage="initial_step", seed=42, temperature=0.9)
+        for i, response in enumerate(responses):  # 修复：添加enumerate获取索引
             initial_step = self.response_handler.get_expand_step_init(response)
             test_out("initial_step", initial_step, self.case_idx, self.dataset_name)
 
@@ -260,16 +271,14 @@ class MCTS_Reasoner:
             # 更新完整上下文
             new_node.update_full_context()
             
-            # 添加到根节点
             root.children.append(new_node)
-            initial_nodes.append(new_node)
             
-            # 如果是叶子节点，添加到全局叶子节点列表
+            # 如果是叶子节点，添加到叶子节点列表
             if new_node.is_final:
                 self.leaf_nodes.append(new_node)
             
             # 记录节点信息到日志
-            self.tree_log["nodes"][new_node.coordinates] = {
+            self.tree_log["nodes"][f"({i+1})"] = {
                 "state": initial_step,
                 "response": response,
                 "visits": 0,
@@ -277,114 +286,34 @@ class MCTS_Reasoner:
                 "is_final": new_node.is_final,
                 "full_context": new_node.full_context
             }
-            
-        return initial_nodes
 
-    async def search(self, num_iterations: int = 20) -> str:
-        """
-        执行MCTS搜索
-        
-        Args:
-            num_iterations: 迭代次数
-        """
-        start_time = time.time()
-        
-        # 1. 创建并初始化根节点
-        root = ReasoningNode(self.question, coordinates="root")
-        self.root = root
-        root.update_full_context()
-        
-        self.tree_log["nodes"]["root"] = {
-            "state": self.question,
-            "response": None,
-            "visits": 0,
-            "value": 0.0,
-            "is_final": False,
-            "full_context": root.full_context
-        }
-
-        # 2. 调用封装好的初始扩展方法，获取初始子节点列表
-        initial_nodes = await self._init_expand(root)
-        
-        # -----------------------------------------------------------
-        # 阶段 A: 并行处理初始节点 (Parallel Initial Exploration)
-        # -----------------------------------------------------------
-        # 初始生成的节点由于visits都为0，在标准MCTS中会被依次选中。
-        # 这里直接通过 gather 并行处理，提高效率。
-        
-        async def process_initial_node(node):
-            """内部帮助函数：处理单个初始节点的模拟和评估"""
-            if not node.is_final:
-                # 扩展并模拟
-                new_nodes, new_values = await self._async_expand_and_simulate(node)
-                return {
-                    "type": "expand",
-                    "parent": node, # 注意：这里的parent是expand出来的节点的父节点，即当前的initial_node
-                    "new_nodes": new_nodes,
-                    "new_values": new_values
-                }
-            else:
-                # 已经是终止节点，直接评估
-                reward = await self._final_simulate(node)
-                return {
-                    "type": "final",
-                    "node": node,
-                    "reward": reward
-                }
-
-        # 创建并行任务
-        test_out("search_phase", "Starting parallel execution for initial nodes", self.case_idx, self.dataset_name)
-        parallel_tasks = [process_initial_node(node) for node in initial_nodes]
-        results = await asyncio.gather(*parallel_tasks)
-        
-        # 处理并行结果并进行反向传播 (Backpropagation)
-        # 注意：反向传播涉及树状态更新，最好在主线程顺序执行以避免竞争（尽管Python有GIL，但逻辑上保持清晰）
-        for res in results:
-            if res["type"] == "expand":
-                # 处理扩展产生的新节点
-                for new_node, new_value in zip(res["new_nodes"], res["new_values"]):
-                    self._backpropagate(new_node, new_value)
-                    if new_node.is_final:
-                        self.leaf_nodes.append(new_node)
-            elif res["type"] == "final":
-                # 处理直接终止的节点
-                self._backpropagate(res["node"], res["reward"])
-
-        # 计算剩余需要执行的迭代次数
-        # 已经在并行阶段消耗了 len(initial_nodes) 次“探索机会”
-        executed_iterations = len(initial_nodes)
-        remaining_iterations = max(0, num_iterations - executed_iterations)
-
-        # -----------------------------------------------------------
-        # 阶段 B: 剩余迭代串行搜索 (Sequential MCTS Loop)
-        # -----------------------------------------------------------
-        test_out("search_phase", f"Starting sequential search for remaining {remaining_iterations} iterations", self.case_idx, self.dataset_name)
-        
-        for i in range(remaining_iterations):
-            real_iter_idx = executed_iterations + i
-            test_out("num_iterations:"+str(real_iter_idx), "", self.case_idx, self.dataset_name)
-            
-            # Select
+        # 执行MCTS迭代
+        # print('*'*30+"searching now"+'*'*30)
+        for _ in range(num_iterations):
+            test_out("num_iterations:"+str(_), "", self.case_idx, self.dataset_name)
             node = self._select(root)
-            
-            # Expand & Simulate & Backpropagate
+            # 如果选中的节点不是终止节点，则进行扩展
             if not node.is_final:
-                new_nodes, new_values = await self._async_expand_and_simulate(node)
+                # 修改：使用 _async_expand 和 _async_simulate
+                new_nodes = await self._async_expand(node)
+                new_values = await self._async_simulate(new_nodes)
+                # 遍历所有新节点，对每个节点进行 simulate 和 backpropagate
                 for new_node, new_value in zip(new_nodes, new_values):
                     self._backpropagate(new_node, new_value)
+                    
+                    # 如果是叶子节点，添加到叶子节点列表
                     if new_node.is_final:
                         self.leaf_nodes.append(new_node)
             else:
                 reward = await self._final_simulate(node)
                 self._backpropagate(node, reward)
 
-        # -----------------------------------------------------------
-        # 结果汇总
-        # -----------------------------------------------------------
-        # 选择最优路径
+        # 选择最优路径 - 调用新的pick_final_answer方法
         best_path, best_solution, answer_frequency = self._pick_final_answer(root)
+        #print("best_path:", ''.join(best_path))
+        #print("best_solution:", best_solution)
         
-        # 生成最终答案
+        # 使用最佳推理路径生成最终答案
         final_answer = await self._output_best_answer(best_solution)
 
         self.tree_log['final_results'] = {
@@ -454,183 +383,28 @@ class MCTS_Reasoner:
             test_out("selection_path", " -> ".join(selection_trace), self.case_idx, self.dataset_name)
         return node
 
-    async def _async_expand_and_simulate(self, chosen_node: ReasoningNode) -> Tuple[List[ReasoningNode], List[float]]:
-        """
-        扩展并模拟节点（带详细交互日志版）。
-        [Mod] 集成了 SC (Self-Consistency) 和 Confidence (置信度) 分数计算。
-        """
-        # 0. 边界条件：最大深度检查
-        if chosen_node.depth >= self.max_depth:
-            final_nodes = await self._max_depth_expand(chosen_node)
-            final_node = final_nodes[0]
-            reward = await self._final_simulate(final_node)
-            return final_nodes, [reward]
+    async def _async_expand(self, chosen_node: ReasoningNode):
+        # 获取当前节点深度
+        current_depth = chosen_node.depth
 
-        # 1. 生成核心想法
+        # 如果达到最大深度，执行rollout而不是扩展
+        if current_depth >= self.max_depth:
+            return await self._max_depth_expand(chosen_node)
+
+        # 使用节点的full_context
         context = chosen_node.full_context
+        # test_out("chosen_node_context", context, self.case_idx, self.dataset_name)
+
+        # 第一步：生成多个不同的核心想法
         core_ideas = await self._generate_diverse_core_ideas(context, self.branch_factor)
         test_out("core_ideas", core_ideas, self.case_idx, self.dataset_name)
 
-        # ------------------------------------------------------------------
-        # 定义局部任务流 (Rollout Flow)
-        # ------------------------------------------------------------------
-        async def _run_rollout_flow(target_node: ReasoningNode) -> Tuple[float, float, float]:
-            """
-            执行 Rollout 流程。
-            Returns:
-                Tuple[float, float, float]: (avg_rollout_score, consistency_score, avg_confidence_score)
-            """
-            # [Mod] 检查 Rollout、SC、Confidence 三个权重，如果全为0则跳过
-            if (self.rollout_weight == 0 and 
-                self.rollout_sc_weight == 0 and 
-                self.rollout_confidence_weight == 0):
-                return 0.0, 0.0, 0.0
-            
-            paths = []
-            avg_path_con = 0.0
+        # 第二步：将每个idea都展开为完整的node
+        expand_tasks = [self._idea_expand(chosen_node, core_idea) for core_idea in core_ideas]
+        new_nodes = await asyncio.gather(*expand_tasks)
 
-            # Step A: 生成路径 (根据是否需要置信度分支处理)
-            if target_node.is_final:
-                paths = [target_node.get_full_reasoning_path()]
-                # Final 节点通常不涉及 Rollout 置信度生成，保持 avg_path_con = 0.0 即可
-            else:
-                # [Mod] 根据权重决定是否开启 confidence_tag
-                if self.rollout_confidence_weight != 0:
-                    paths, path_con_scores = await self._rollout_paths(target_node, confidence_tag=True)
-                    # print(f"Node {target_node.coordinates} rollout num: {len(paths)}")
-                    # print("calculating paths confidences")
-                    
-                    # [Mod] 计算平均置信度
-                    if path_con_scores:
-                        avg_path_con = sum(path_con_scores) / len(path_con_scores)
-                    
-                    test_out("rollout_con_score", f"{avg_path_con:.6f}", self.case_idx, self.dataset_name)
-                else:
-                    paths = await self._rollout_paths(target_node)
-            
-            if not paths: 
-                return 0.0, 0.0, 0.0
+        return new_nodes
 
-            # [Mod] 计算 Self-Consistency Score (SC)
-            sc_score = self._get_avg_sc_score(paths)
-            test_out("rollout_sc_score", f"{sc_score:.6f}", self.case_idx, self.dataset_name)
-
-            # 如果 Rollout 评估权重为 0，就不需要跑昂贵的评估模型了，返回 (0, sc, con)
-            if self.rollout_weight == 0:
-                return 0.0, sc_score, avg_path_con
-
-            # Step B: 并行评估路径 (原逻辑)
-            eval_tasks = [
-                self._rollout_evaluation(target_node, path, i) 
-                for i, path in enumerate(paths)
-            ]
-            results = await asyncio.gather(*eval_tasks)
-            
-            # Step C: 记录日志并计算平均分
-            scores = []
-            for i, (score, r_prompt, r_response) in enumerate(results):
-                scores.append(score)
-                #test_out(f"rollout_{i}_prompt", r_prompt, self.case_idx, self.dataset_name)
-                test_out(f"Node {target_node.coordinates}: rollout_{i}_reward_res", r_response, self.case_idx, self.dataset_name)
-                test_out("rollout_reward_score", f"rollout_{i}: {score:.6f}", self.case_idx, self.dataset_name)
-            
-            avg_score = sum(scores) / len(scores) if scores else 0.0
-            
-            # [Mod] 返回三元组：平均分、一致性分数、置信度分数
-            return avg_score, sc_score, avg_path_con
-
-        # ------------------------------------------------------------------
-        # 定义局部任务流 (Process Eval)
-        # ------------------------------------------------------------------
-        async def _run_process_eval(target_node: ReasoningNode) -> float:
-            if self.process_weight == 0:
-                return 0.0
-            
-            p_reward, p_prompt, p_response = await self._process_evaluation(
-                target_node, target_node.full_context, target_node.state
-            )
-            
-            #test_out("process_prompt", p_prompt, self.case_idx, self.dataset_name)
-            test_out(f"Node {target_node.coordinates}: process_res", p_response, self.case_idx, self.dataset_name)
-            test_out("process_score", f"{p_reward:.6f}", self.case_idx, self.dataset_name)
-            return p_reward
-
-        # ------------------------------------------------------------------
-        # 阶段 1: 扩展并启动局部任务
-        # ------------------------------------------------------------------
-        async def _expand_and_schedule(core_idea: str):
-            new_node = await self._idea_expand(chosen_node, core_idea)
-            p_task = asyncio.create_task(_run_process_eval(new_node))
-            r_task = asyncio.create_task(_run_rollout_flow(new_node))
-            return new_node, p_task, r_task
-
-        expand_results = await asyncio.gather(*[_expand_and_schedule(idea) for idea in core_ideas])
-        
-        if not expand_results:
-            return [], []
-
-        new_nodes = [r[0] for r in expand_results]
-        process_tasks = [r[1] for r in expand_results]
-        rollout_tasks = [r[2] for r in expand_results]
-
-        # ------------------------------------------------------------------
-        # 阶段 2: 启动全局任务 (Pairwise)
-        # ------------------------------------------------------------------
-        pairwise_task = None
-        if self.pairwise_weight != 0 and len(new_nodes) > 1:
-            pairwise_task = asyncio.create_task(self._pairwise_evaluation(new_nodes))
-
-        # ------------------------------------------------------------------
-        # 阶段 3: 最终汇聚
-        # ------------------------------------------------------------------
-        all_wait_tasks = process_tasks + rollout_tasks
-        if pairwise_task:
-            all_wait_tasks.append(pairwise_task)
-        
-        if all_wait_tasks:
-            await asyncio.gather(*all_wait_tasks)
-
-        # ------------------------------------------------------------------
-        # 阶段 4: 提取结果并计算最终奖励
-        # ------------------------------------------------------------------
-        final_values = []
-        
-        pairwise_scores = [0.0] * len(new_nodes)
-        if pairwise_task:
-            pw_result = pairwise_task.result()
-            pairwise_scores = pw_result[0]
-            pw_details = pw_result[1] 
-            # test_out("pairwise_details", pw_details, self.case_idx, self.dataset_name)
-
-        for i, node in enumerate(new_nodes):
-            p_score = process_tasks[i].result()
-            
-            # [Mod] 解包 rollout 任务的结果 (r_score, sc_score, con_score)
-            r_score, sc_score, con_score = rollout_tasks[i].result()
-            
-            pw_score = pairwise_scores[i]
-            
-            # [Mod] 计算 Final Reward，加入 Confidence 权重
-            final_reward = (
-                self.process_weight * p_score +
-                self.rollout_weight * r_score +
-                self.pairwise_weight * pw_score +
-                self.rollout_sc_weight * sc_score +
-                self.rollout_confidence_weight * con_score 
-            )
-            
-            self.tree_log["nodes"][node.coordinates]["value"] = final_reward
-            
-            # [Mod] 更新日志显示 SC 和 Confidence 分数
-            node_rewards_log = (f"final={final_reward:.6f} "
-                                f"(p={p_score:.6f}, r={r_score:.6f}, pw={pw_score:.6f}, "
-                                f"sc={sc_score:.6f}, con={con_score:.6f})")
-            test_out("final_reward", f"Node {node.coordinates}: {node_rewards_log}", self.case_idx, self.dataset_name)
-            
-            final_values.append(final_reward)
-
-        return new_nodes, final_values
-    
     async def _generate_diverse_core_ideas(self, context: str, num_ideas: int) -> list:
         """
         生成多个不同的核心想法，用于扩展节点
@@ -646,11 +420,11 @@ class MCTS_Reasoner:
             num_ideas=num_ideas,
             idea_guidance=self.idea_guidance
         )
-        #test_out("diverse_ideas_prompt", prompt, self.case_idx, self.dataset_name)
+        test_out("diverse_ideas_prompt", prompt, self.case_idx, self.dataset_name)
 
         # 添加多样化想法生成阶段的停止序列
-        response = (await self.llm_client.generate(prompt, stop_stage='diverse_ideas'))[0]
-        #test_out("diverse_ideas_response", response, self.case_idx, self.dataset_name)
+        response = await self.llm_client.generate(prompt, stop_stage='diverse_ideas')
+        test_out("diverse_ideas_response", response, self.case_idx, self.dataset_name)
 
         # 解析核心想法，调用ResponseHandler的方法
         core_ideas = self.response_handler.parse_diverse_ideas(response, num_ideas)
@@ -662,13 +436,13 @@ class MCTS_Reasoner:
             core_instruction=core_idea,
             expand_guidance=self.expand_guidance
         )
-        #test_out("expand_prompt", prompt, self.case_idx, self.dataset_name)
+        test_out("expand_prompt", prompt, self.case_idx, self.dataset_name)
 
         # 调用LLM生成下一步推理
-        expand_response = (await self.llm_client.generate(prompt, 
+        expand_response = await self.llm_client.generate(prompt, 
                                             stop_stage='expand', 
-                                            skip_special_tokens=False))[0]
-        #test_out("expand_response", expand_response, self.case_idx, self.dataset_name)
+                                            skip_special_tokens=False)
+        test_out("expand_response", expand_response, self.case_idx, self.dataset_name)
         
         # 处理LLM的响应，提取下一步推理内容
         new_step = self.response_handler.get_expand_step(core_idea, expand_response)
@@ -703,15 +477,204 @@ class MCTS_Reasoner:
             "full_path": new_node.full_context  # 记录完整上下文
         }
         return new_node
-    
-    async def _rollout_paths(self, new_node: ReasoningNode, confidence_tag=False):
+        
+    async def _async_simulate(self, new_nodes: List[ReasoningNode]) -> List[float]:
         """
-        用于对单个的new_node进行rollout后，返回多条轨迹full_reasoning_paths
-        适配说明：基于 generate 方法始终返回 List 的逻辑进行简化
+        异步模拟方法，根据信号开关决定执行哪些计算
+        
+        Args:
+            new_nodes: 新生成的节点列表
+        Returns:
+            每个节点的最终奖励列表
         """
-        # 1. --- 计算 Rollout 数量 (保持不变) ---
+        final_rewards = []
+        node_rewards = {}  # 存储每个节点的各种奖励值
+        
+        # 初始化所有节点的奖励字典
+        for node in new_nodes:
+            test_out("simulating", f"Processing node: {node.coordinates}", self.case_idx, self.dataset_name)
+            node_rewards[node.coordinates] = {
+                'rollout_reward': 0.0,
+                'process_reward': 0.0,
+                'compared_reward': 0.0
+            }
+        
+        # 第一阶段：如果rollout_weight != 0，先执行所有节点的rollout路径生成
+        rollout_paths_results = {}
+        if self.rollout_weight != 0:
+            test_out("rollout_phase", "Starting rollout paths generation phase", self.case_idx, self.dataset_name)
+            
+            # 为所有节点创建rollout路径生成任务（对终止节点直接使用full_context）
+            rollout_paths_tasks = []
+            node_task_pairs = []
+            for node in new_nodes:
+                if node.is_final:
+                    full_reasoning_path = node.get_full_reasoning_path()
+                    rollout_paths_results[node.coordinates] = [full_reasoning_path]
+                    test_out("rollout_paths_skipped_final", f"Node {node.coordinates} is final; using full_context as rollout path", 
+                            self.case_idx, self.dataset_name)
+                else:
+                    task = self._rollout_paths(node)
+                    rollout_paths_tasks.append(task)
+                    node_task_pairs.append(node)
+            
+            # 执行非终止节点的rollout路径生成任务
+            if rollout_paths_tasks:
+                rollout_paths_results_list = await asyncio.gather(*rollout_paths_tasks)
+                
+                # 将结果映射到对应的节点
+                for node, full_reasoning_paths in zip(node_task_pairs, rollout_paths_results_list):
+                    rollout_paths_results[node.coordinates] = full_reasoning_paths
+                    test_out("rollout_paths_generated", f"Node {node.coordinates}: generated {len(full_reasoning_paths)} rollout paths", 
+                            self.case_idx, self.dataset_name)
+        
+        # 第二阶段：创建所有评估任务（包括rollout奖励评估、process评估、pairwise评估）
+        all_tasks = []
+        task_mapping = {}  # 用于映射任务到节点和奖励类型
+
+        
+        # 1. 创建process评估任务
+        if self.process_weight != 0:
+            for node in new_nodes:
+                process_task = self._process_evaluation(node, node.full_context, node.state)
+                all_tasks.append(process_task)
+                task_mapping[process_task] = {
+                    'node': node,
+                    'reward_type': 'process_reward',
+                    'signal': 'process'
+                }
+        
+        # 2. 创建rollout奖励评估任务（基于第一阶段生成的路径）
+        if self.rollout_weight != 0:
+            for node in new_nodes:
+                full_reasoning_paths = rollout_paths_results[node.coordinates]
+                # 为每个路径创建奖励评估任务
+                for rollout_idx, full_reasoning_path in enumerate(full_reasoning_paths):
+                    rollout_reward_task = self._rollout_evaluation(node, full_reasoning_path, rollout_idx)
+                    all_tasks.append(rollout_reward_task)
+                    task_mapping[rollout_reward_task] = {
+                        'node': node,
+                        'reward_type': 'rollout_reward',
+                        'signal': 'rollout',
+                        'rollout_idx': rollout_idx,
+                        'full_reasoning_path': full_reasoning_path
+                    }
+        
+        # 3. 创建pairwise评估任务
+        if self.pairwise_weight != 0 and len(new_nodes) > 1:
+            pairwise_task = self._pairwise_evaluation(new_nodes)
+            all_tasks.append(pairwise_task)
+            task_mapping[pairwise_task] = {
+                'nodes': new_nodes,
+                'reward_type': 'compared_reward',
+                'signal': 'pairwise',
+                'is_batch_task': True
+            }
+        
+        # 执行所有评估任务
+        if all_tasks:
+            test_out("evaluation_phase", f"Starting evaluation phase with {len(all_tasks)} tasks", self.case_idx, self.dataset_name)
+            results = await asyncio.gather(*all_tasks)
+            
+            # 收集日志并更新奖励（按类型归类）
+            process_logs = []
+            rollout_logs = []
+            pairwise_logs = []
+            
+            # 处理结果
+            for task, result in zip(all_tasks, results):
+                task_info = task_mapping[task]
+                
+                if task_info['signal'] == 'process':
+                    node = task_info['node']
+                    process_reward, process_prompt, process_response = result
+                    node_rewards[node.coordinates]['process_reward'] = process_reward
+                    process_logs.append({
+                        'node_coords': node.coordinates,
+                        'prompt': process_prompt,
+                        'response': process_response,
+                        'score': process_reward
+                    })
+                    
+                elif task_info['signal'] == 'rollout':
+                    node = task_info['node']
+                    rollout_reward, rollout_prompt, rollout_response = result
+                    if 'rollout_rewards' not in node_rewards[node.coordinates]:
+                        node_rewards[node.coordinates]['rollout_rewards'] = []
+                    node_rewards[node.coordinates]['rollout_rewards'].append(rollout_reward)
+                    rollout_logs.append({
+                        'node_coords': node.coordinates,
+                        'rollout_idx': task_info['rollout_idx'] + 1,
+                        'prompt': rollout_prompt,
+                        'response': rollout_response,
+                        'score': rollout_reward
+                    })
+                    
+                elif task_info['signal'] == 'pairwise' and task_info.get('is_batch_task'):
+                    compared_rewards, pair_details = result
+                    for i, node in enumerate(new_nodes):
+                        node_rewards[node.coordinates]['compared_reward'] = compared_rewards[i]
+                    # 记录每个pair的prompt/response/score
+                    for pd in pair_details:
+                        pairwise_logs.append({
+                            'prompt': pd.get('prompt', ''),
+                            'response': pd.get('response', ''),
+                            'score': pd.get('score', 0.0),
+                            'nodeA_idx': pd.get('nodeA_idx'),
+                            'nodeB_idx': pd.get('nodeB_idx')
+                        })
+            
+            # 计算每个节点的平均rollout奖励
+            if self.rollout_weight != 0:
+                for node in new_nodes:
+                    coords = node.coordinates
+                    if 'rollout_rewards' in node_rewards[coords]:
+                        rollout_rewards = node_rewards[coords]['rollout_rewards']
+                        avg_rollout_reward = sum(rollout_rewards) / len(rollout_rewards)
+                        node_rewards[coords]['rollout_reward'] = avg_rollout_reward
+            
+            # 按顺序输出日志：process -> rollout -> pairwise
+            for log in process_logs:
+                test_out("process_prompt", log['prompt'], self.case_idx, self.dataset_name)
+                test_out("process_response", log['response'], self.case_idx, self.dataset_name)
+                test_out("process_score", f"{log['score']:.6f}", self.case_idx, self.dataset_name)
+            
+            for log in rollout_logs:
+                test_out("rollout_reward_prompt", log['prompt'], self.case_idx, self.dataset_name)
+                test_out("rollout_reward_response", log['response'], self.case_idx, self.dataset_name)
+                test_out("rollout_reward_score", f"rollout_{log['rollout_idx']}: {log['score']:.6f}", self.case_idx, self.dataset_name)
+            
+            for log in pairwise_logs:
+                test_out("pairwise_prompt", log['prompt'], self.case_idx, self.dataset_name)
+                test_out("pairwise_response", log['response'], self.case_idx, self.dataset_name)
+                test_out("pairwise_score", f"{log['score']}", self.case_idx, self.dataset_name)
+
+
+        # 计算最终奖励
+        for node in new_nodes:
+            coords = node.coordinates
+            rollout_reward = node_rewards[coords]['rollout_reward']
+            process_reward = node_rewards[coords]['process_reward']
+            compared_reward = node_rewards[coords]['compared_reward']
+            
+            # 加权计算最终奖励
+            final_reward = self.rollout_weight * rollout_reward + self.process_weight * process_reward + self.pairwise_weight * compared_reward
+            
+            test_out("final_reward", f"Node {coords}: final_reward={final_reward:.6f} (process={process_reward:.6f}, rollout={rollout_reward:.6f}, compared={compared_reward:.6f})", 
+                    self.case_idx, self.dataset_name)
+            
+            final_rewards.append(final_reward)
+        
+        return final_rewards
+
+    async def _rollout_paths(self, new_node: ReasoningNode):
+        """
+            用于对单个的new_node进行rollout后，返回多条轨迹full_reasoning_paths
+        """
+        # 获取当前节点深度
         current_depth = new_node.depth
         
+        # 根据深度动态调整rollout次数
         if current_depth <= self.max_depth / 3:
             actual_rollout_num = self.rollout_num
             depth_ratio = 1.0
@@ -725,50 +688,20 @@ class MCTS_Reasoner:
         actual_rollout_num = max(1, actual_rollout_num)
         
         test_out("dynamic_rollout", f"Depth: {current_depth}/{self.max_depth}, Ratio: {depth_ratio}, Rollouts: {actual_rollout_num}/{self.rollout_num}", self.case_idx, self.dataset_name)
-        #test_out("previous steps", new_node.full_context, self.case_idx, self.dataset_name)
-        
+        test_out("previous steps", new_node.full_context, self.case_idx, self.dataset_name)
+        # 执行rollout
         rollout_prompt = self.prompt_handler.get_rollout_prompt(new_node.full_context)
-        #test_out("rollout_prompt:", rollout_prompt, self.case_idx, self.dataset_name)
+        test_out("rollout_prompt:", rollout_prompt, self.case_idx, self.dataset_name)
         
-        # 2. --- 调用 Generate (逻辑简化) ---
-        # 无论 n=1 还是 n>1，返回的数据结构保持一致
-        llm_output = await self.llm_client.generate(
-            rollout_prompt, 
-            stop_stage='rollout', 
-            n=actual_rollout_num, 
-            max_tokens=1000, 
-            seed=None,
-            confidence_tag=confidence_tag
-        )
+        # 添加rollout阶段的停止序列
+        rollout_responses = await self.llm_client.generate(rollout_prompt, stop_stage='rollout', n=actual_rollout_num, max_tokens=1000)
 
-        # 3. --- 处理返回值 (解包逻辑) ---
-        rollout_responses = []
-        confidence_list = []
-
-        if confidence_tag:
-            # Generate 返回 ([text1, text2...], [conf1, conf2...])
-            rollout_responses, confidence_list = llm_output
-        else:
-            # Generate 返回 [text1, text2...]
-            rollout_responses = llm_output
-            # 此时不需要处理 confidence_list
-
-        # 4. --- 构建推理路径 (统一循环处理) ---
         full_reasoning_paths = []
-        
-        # 因为 rollout_responses 始终是列表，直接遍历即可，无需担心 string 类型报错
         for rollout_idx, rollout_response in enumerate(rollout_responses):
-            # 获取完整路径
             full_reasoning_path = new_node.get_full_reasoning_path(rollout_response)
             full_reasoning_paths.append(full_reasoning_path)
-            
-            #test_out("rollout_response:", rollout_response, self.case_idx, self.dataset_name)
-        
-        # 5. --- 返回结果 ---
-        if confidence_tag:
-            return full_reasoning_paths, confidence_list
-        else:
-            return full_reasoning_paths
+            test_out("rollout_response:", rollout_response, self.case_idx, self.dataset_name)
+        return full_reasoning_paths
 
     async def _rollout_evaluation(self, node: ReasoningNode, full_reasoning_path: str, rollout_idx: int):
         rollout_key = f"{node.coordinates}_rollout_{rollout_idx+1}"
@@ -805,7 +738,7 @@ class MCTS_Reasoner:
             self.pairwise_criterions,
             self.case_idx
         )
-        #print("compared_rewards:", compared_rewards)
+        print("compared_rewards:", compared_rewards)
         return compared_rewards, pair_details
 
     async def _max_depth_expand(self, node: ReasoningNode) -> List[ReasoningNode]:
@@ -827,7 +760,7 @@ class MCTS_Reasoner:
         prompt = self.prompt_handler.get_rollout_prompt(context)
         test_out("rollout_prompt_at_max_depth", prompt, self.case_idx, self.dataset_name)
         
-        response = (await self.llm_client.generate(prompt, stop_stage='rollout'))[0]
+        response = await self.llm_client.generate(prompt, stop_stage='rollout')
         test_out("rollout_response_at_max_depth", response, self.case_idx, self.dataset_name)
         
         # 创建终止节点
@@ -879,7 +812,7 @@ class MCTS_Reasoner:
             self.case_idx
         )
         # 终止节点：统一在此输出 prompt/response/score
-        #test_out("terminal_reward_prompt", reward_prompt, self.case_idx, self.dataset_name)
+        test_out("terminal_reward_prompt", reward_prompt, self.case_idx, self.dataset_name)
         test_out("terminal_reward_response", reward_response, self.case_idx, self.dataset_name)
         test_out("terminal_reward", f"{final_reward:.6f}", self.case_idx, self.dataset_name)
         
@@ -906,86 +839,97 @@ class MCTS_Reasoner:
         Returns:
             最佳推理路径
         """
-        # 0. 异常处理：如果没有叶子节点
         if not self.leaf_nodes:
+            # 如果没有找到任何叶子节点，返回访问次数最多的子节点路径
             best_child = max(root.children, key=lambda c: c.visits)
-            test_out("no_leaf_nodes", f"Using best child: {best_child.coordinates}", self.case_idx, self.dataset_name)
-            return best_child.reasoning_path, best_child.full_context, {}
+            best_path = best_child.reasoning_path
+            best_solution = best_child.full_context
+            test_out("no_leaf_nodes_found", f"Using best child with most visits: {best_child.coordinates}", self.case_idx, self.dataset_name)
+            return best_path, best_solution, {}
         
-        # 1. 准备数据：提取所有叶子节点的 Response
-        leaf_solution_list = [leaf.response for leaf in self.leaf_nodes]
-        total_leaf_count = len(leaf_solution_list)
+        # 计算答案频率作为置信度得分
+        answer_frequency = self._calculate_answer_frequency()
+        test_out("answer_frequency", f"Answer frequency distribution: {answer_frequency}", self.case_idx, self.dataset_name)
         
-        # 2. 计算频率：基于 Response 列表提取答案并统计
-        answer_frequency = self._calculate_answer_frequency(leaf_solution_list)
+        # 输出所有答案的置信度排序（从大到小）
+        self._output_answer_confidence_ranking(answer_frequency)
         
-        # [日志] 仅保留汇总信息
-        test_out("answer_stats", f"Leaves: {total_leaf_count}, Distribution: {answer_frequency}", self.case_idx, self.dataset_name)
-        
+        # 计算每个叶子节点的加权价值
         best_leaf = None
         best_weighted_value = float('-inf')
         
-        # 遍历叶子节点寻找最佳路径
+        test_out("evaluating_leaf_nodes", f"Found {len(self.leaf_nodes)} leaf nodes to evaluate", self.case_idx, self.dataset_name)
+        
         for leaf in self.leaf_nodes:
-            # --- A. 计算路径平均价值 (Path Mean Value) ---
-            path_values = []
-            current_node = leaf
+            leaf_coords = leaf.coordinates
+            test_out("evaluating_leaf", f"Evaluating leaf node: {leaf_coords}", self.case_idx, self.dataset_name)
             
-            # 回溯路径
+            # 计算路径平均价值：从根节点到叶子节点路径上所有节点的value/visits的平均值
+            path_values = []
+            test_out("path_analysis", f"Analyzing reasoning path for leaf {leaf_coords}: {leaf.reasoning_path}", self.case_idx, self.dataset_name)
+            
+            # 从叶子节点向上遍历到根节点，收集路径上所有节点的value/visits
+            current_node = leaf
             path_nodes = []
             while current_node is not None:
                 path_nodes.append(current_node)
                 current_node = current_node.parent
-            path_nodes.reverse() # 调整为 根 -> 叶 顺序
+            
+            # 从根节点到叶子节点的顺序（reverse path_nodes）
+            path_nodes.reverse()
             
             for node in path_nodes:
                 if node.visits > 0:
-                    path_values.append(node.value / node.visits)
+                    step_value = node.value / node.visits
+                    path_values.append(step_value)
+                    test_out("step_value", f"Node {node.coordinates}: visits={node.visits}, value={node.value:.6f}, step_value={step_value:.6f}", self.case_idx, self.dataset_name)
                 else:
+                    test_out("step_value", f"Node {node.coordinates}: visits=0, step_value=0", self.case_idx, self.dataset_name)
                     path_values.append(0.0)
             
             path_mean_value = sum(path_values) / len(path_values) if path_values else 0
+            test_out("path_mean_calculation", f"Leaf {leaf_coords}: path_values={path_values}, path_mean_value={path_mean_value:.6f}", self.case_idx, self.dataset_name)
             
-            # --- B. 计算叶子节点价值 (Leaf Value) ---
+            # 计算叶子节点价值：value/visits
             leaf_value = leaf.value / leaf.visits if leaf.visits > 0 else 0
+            test_out("leaf_value_calculation", f"Leaf {leaf_coords}: visits={leaf.visits}, total_value={leaf.value:.6f}, leaf_value={leaf_value:.6f}", self.case_idx, self.dataset_name)
             
-            # --- C. 计算置信度 (Confidence Score) ---
-            # 3. & 4. 提取当前节点的答案，并从字典中获取占比
+            # 计算置信度得分
             leaf_answer = self._extract_answer_from_response(leaf.response)
-            confidence_prop = self._get_answer_likelihood(leaf_answer, answer_frequency, total_leaf_count)
+            confidence_score = answer_frequency.get(leaf_answer, 0) / len(self.leaf_nodes) * 10 if leaf_answer else 0 #保持量纲一致，都是0-10分
+            test_out("confidence_calculation", f"Leaf {leaf_coords}: answer='{leaf_answer}', confidence_score={confidence_score:.6f}", self.case_idx, self.dataset_name)
             
-            # 将占比 (0-1) 映射到评分 (0-10)
-            confidence_score = confidence_prop * 10
-            
-            # --- D. 计算加权总分 ---
+            # 加权计算最终价值 - 新公式：weighted_value = balance_beta * path_mean_value + (1 - balance_beta) * (leaf_value + confidence_score) / 2
             enhanced_leaf_value = (leaf_value + confidence_score) / 2
             weighted_value = self.balance_beta * path_mean_value + (1 - self.balance_beta) * enhanced_leaf_value
+            test_out("weighted_value_calculation", f"Leaf {leaf_coords}: balance_beta={self.balance_beta}, enhanced_leaf_value={enhanced_leaf_value:.6f} (leaf_value={leaf_value:.6f} + confidence_score={confidence_score:.6f}), weighted_value={weighted_value:.6f}", self.case_idx, self.dataset_name)
             
-            # 更新最佳节点
             if weighted_value > best_weighted_value:
                 best_weighted_value = weighted_value
                 best_leaf = leaf
-                # [日志] 仅在发现更好的节点时输出简要信息，避免刷屏
-                test_out("new_best_found", f"Leaf {leaf.coordinates} best so far (score: {weighted_value:.4f}, ans: '{leaf_answer}')", self.case_idx, self.dataset_name)
+                test_out("new_best_leaf", f"Leaf {leaf_coords} becomes new best with weighted_value={weighted_value:.6f}", self.case_idx, self.dataset_name)
+            else:
+                test_out("leaf_comparison", f"Leaf {leaf_coords} weighted_value={weighted_value:.6f} <= current_best={best_weighted_value:.6f}", self.case_idx, self.dataset_name)
         
-        # 构造返回值
+        # 从根节点到最佳叶子节点的完整路径
         best_path = best_leaf.reasoning_path if best_leaf else []
         best_solution = best_leaf.full_context if best_leaf else ""
-        best_coords = best_leaf.coordinates if best_leaf else "None"
-        
-        # [日志] 最终结果
-        test_out("final_selection", f"Selected {best_coords}, Score: {best_weighted_value:.4f}", self.case_idx, self.dataset_name)
+        best_leaf_coords = best_leaf.coordinates if best_leaf else "None"
+        test_out("final_path_selection", f"Selected best leaf: {best_leaf_coords} with weighted_value={best_weighted_value:.6f}", self.case_idx, self.dataset_name)
+        test_out("final_path_details", f"Best path coordinates: {best_leaf_coords}, path length: {len(best_path)}", self.case_idx, self.dataset_name)
         
         return best_path, best_solution, answer_frequency
 
     def _extract_answer_from_response(self, response: str) -> str:
         """从响应中提取最终答案"""
-        # 1. 尝试提取 \boxed{} (保持原样)
-        boxed_matches = re.findall(r'\\boxed\{((?:[^{}]|\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\})*)\}', response)
+        # 首先尝试提取\boxed{}格式的答案
+        boxed_matches = re.findall(r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}', response)
         if boxed_matches:
+            # 返回最后一个boxed答案
             return boxed_matches[-1].strip()
         
-        # 2. 文本模式匹配
+        # 如果没有找到boxed格式，尝试其他常见的答案格式
+        # 查找"答案是"、"答案为"、"answer is"等模式
         answer_patterns = [
             r'答案是[：:]?\s*([^\n]+)',
             r'答案为[：:]?\s*([^\n]+)',
@@ -998,106 +942,43 @@ class MCTS_Reasoner:
         for pattern in answer_patterns:
             matches = re.findall(pattern, response, re.IGNORECASE)
             if matches:
-                candidate = matches[-1].strip()
-                
-                # --- 新增补丁开始 ---
-                # 如果捕获的内容像 "to the question is \boxed{...}"
-                # 我们再次检查其中是否包含 boxed，如果有，强行提取 boxed
-                if "\\boxed" in candidate:
-                    sub_boxed = re.findall(r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}', candidate)
-                    if sub_boxed:
-                        return sub_boxed[-1].strip()
-                
-                # 去除常见的连接词前缀 (如果不含boxed，可能是纯文本答案)
-                # 比如匹配到 "to the question is 5"，去除 "to the question is "
-                candidate = re.sub(r'^(to the question is|is|:)\s*', '', candidate, flags=re.IGNORECASE).strip()
-                # --- 新增补丁结束 ---
-                
-                return candidate
+                return matches[-1].strip()
         
+        # 如果都没找到，返回空字符串
         return ""
-
-    def _calculate_answer_frequency(self, leaf_solutions: List[str]) -> dict:
-        """
-        计算答案列表中的出现频率
-        Args:
-            leaf_solutions: 所有叶子节点的响应字符串列表
-        Returns:
-            answer_counts: 答案与其出现次数的字典
-        """
+    
+    def _calculate_answer_frequency(self) -> dict:
+        """计算所有叶子节点中答案的出现频率"""
         answer_counts = {}
         
-        for response in leaf_solutions:
-            answer = self._extract_answer_from_response(response)
+        for leaf in self.leaf_nodes:
+            answer = self._extract_answer_from_response(leaf.response)
             if answer:  # 只统计非空答案
                 answer_counts[answer] = answer_counts.get(answer, 0) + 1
         
         return answer_counts
-
-    def _get_answer_likelihood(self, answer: str, answer_frequency: dict, total_count: int) -> float:
-        """
-        根据答案频率字典计算特定答案的置信度值（占比）
+    
+    def _output_answer_confidence_ranking(self, answer_frequency: dict):
+        """输出所有答案的置信度排序（从大到小）"""
+        if not answer_frequency:
+            test_out("confidence_ranking", "No valid answers found in leaf nodes", self.case_idx, self.dataset_name)
+            return
         
-        Args:
-            answer: 提取出的答案字符串
-            answer_frequency: 答案频率字典
-            total_count: 总样本数（通常为叶子节点总数）
-            
-        Returns:
-            float: 该答案的占比 (0.0 - 1.0)
-        """
-        if not answer or total_count == 0:
-            return 0.0
-            
-        count = answer_frequency.get(answer, 0)
-        return count / total_count
-
-    def _get_avg_sc_score(self, solution_list: List[str]) -> float:
-        """
-        计算一组解的平均 Self-Consistency (SC) 分数。
+        total_leaf_nodes = len(self.leaf_nodes)
         
-        逻辑流程:
-        1. 利用 _calculate_answer_frequency 得到所有答案的频率分布。
-        2. 遍历 solution_list 中的每一条回复：
-           - 提取其答案。
-           - 查找该答案的置信度 (Confidence)。
-        3. 计算所有回复置信度的平均值。
+        # 计算每个答案的置信度得分并排序
+        confidence_scores = []
+        for answer, count in answer_frequency.items():
+            confidence_score = count / total_leaf_nodes
+            confidence_scores.append((answer, count, confidence_score))
         
-        Args:
-            solution_list: 模型生成的回复列表
-            
-        Returns:
-            float: 平均置信度分数 (0.0 - 1.0)
-        """
-        # print("calculating rollout self consistency")
-        if not solution_list:
-            return 0.0
+        # 按置信度得分从大到小排序
+        confidence_scores.sort(key=lambda x: x[2], reverse=True)
         
-        if len(solution_list)<2:
-            return 0.5
-
-        # 1. 获取答案频率字典 (内部已调用 _extract_answer_from_response)
-        # 这一步统计了每种答案(answer)出现的次数
-        answer_frequency = self._calculate_answer_frequency(solution_list)
-        
-        # 总样本数 (通常为列表长度，用于计算分母)
-        total_count = len(solution_list)
-        
-        total_likelihood_score = 0.0
-        
-        # 2. 遍历每条 solution，计算其对应的 score 并累加
-        for response in solution_list:
-            # 需要重新提取一次答案，以确定当前 response 对应哪个 answer
-            answer = self._extract_answer_from_response(response)
-            
-            # 获取该答案的置信度 (占比)
-            # 如果 answer 为空字符串 (提取失败)，frequency.get 也是 0，likelihood 为 0.0
-            likelihood = self._get_answer_likelihood(answer, answer_frequency, total_count)
-            
-            total_likelihood_score += likelihood
-            
-        # 3. 返回平均值
-        return total_likelihood_score / total_count
+        # 输出排序结果
+        test_out("confidence_ranking", f"Answer confidence ranking (total leaf nodes: {total_leaf_nodes}):", self.case_idx, self.dataset_name)
+        for i, (answer, count, confidence) in enumerate(confidence_scores, 1):
+            test_out("confidence_ranking", f"  {i}. Answer: '{answer}' | Count: {count} | Confidence: {confidence:.4f}", self.case_idx, self.dataset_name)
 
     async def _output_best_answer(self, best_solution: str) -> str:
         """
@@ -1112,14 +993,14 @@ class MCTS_Reasoner:
         
         # 使用prompt_handler获取best_answer模板
         prompt = self.prompt_handler.get_best_answer_prompt(question, best_solution, self.answer_restrictions)
-        #test_out("best_answer_prompt", prompt, self.case_idx, self.dataset_name)
+        test_out("best_answer_prompt", prompt, self.case_idx, self.dataset_name)
         
         # 调用LLM生成最终答案
-        final_answer_response = (await self.llm_client.generate(
+        final_answer_response = await self.llm_client.generate(
             prompt, 
             stop_stage='best_answer', 
             skip_special_tokens=False
-        ))[0]
+        )
         test_out("final_answer_response", "The final answer is: \\boxed{" + final_answer_response, self.case_idx, self.dataset_name)
 
         final_answer = self.response_handler.parse_best_answer(final_answer_response)
@@ -1177,11 +1058,11 @@ async def main():
     }
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", type=str, default="Olympiadphysics", help="Name of the dataset") 
-    parser.add_argument("--model", type=str, default="../models/Qwen3-8B", 
+    parser.add_argument("--dataset_name", type=str, default="amc23", help="Name of the dataset") 
+    parser.add_argument("--model", type=str, default="../models/Meta-Llama-3.1-8B-Instruct", 
                        help="模型名称或路径。对于aihub模式，使用模型名称（如qwen-max）；对于transformer和vllm模式，使用模型路径")
-    parser.add_argument("--case_start", type=int, default=2, help="Start index of cases")
-    parser.add_argument("--case_end", type=int, default=2, help="End index of cases")
+    parser.add_argument("--case_start", type=int, default=1, help="Start index of cases")
+    parser.add_argument("--case_end", type=int, default=1, help="End index of cases")
     parser.add_argument("--num_iterations", type=int, default=15, help="Number of MCTS iterations")
     parser.add_argument("--exploration_constant", type=float, default=1.41, help="Exploration constant for UCT formula")
     parser.add_argument("--branch_factor", type=int, default=3, 

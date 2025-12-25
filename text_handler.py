@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Tuple
 
 class SearchGuideHandler:
     def __init__(self, guide_file: str = "search_guide.json", dataset_name: str = None):
@@ -31,6 +31,10 @@ class SearchGuideHandler:
         except Exception as e:
             print(f"Error loading {self.guide_file}: {e}")
             return None
+
+    def get_init_expand_guidance(self) -> str:
+        """获取初始扩展指导"""
+        return self.guide_config.get("init_expand_guidance", "")
 
     def get_idea_guidance(self) -> str:
         """获取核心想法指导"""
@@ -128,12 +132,13 @@ class PromptHandler:
                 add_generation_prompt=True
             )
     
-    def get_init_prompt(self, question: str) -> str:
+    def get_init_prompt(self, question: str, init_expand_guidance: str = "") -> str:
         """
         生成初始化步骤的prompt
         
         Args:
             question: 用户输入的问题
+            init_expand_guidance: 初始扩展指导
         Returns:
             完整的prompt字符串
         """
@@ -153,6 +158,8 @@ class PromptHandler:
         
         # 替换用户问题占位符
         prompt = prompt.replace("[user question]", question)
+        # 替换初始扩展指导占位符
+        prompt = prompt.replace("[init_expand_guidance]", init_expand_guidance)
         
         return prompt
 
@@ -366,7 +373,7 @@ class ResponseHandler:
         # print("response:\n",response)
         return response
     
-    def get_expand_step(self, core_idea: str, response: str) -> str:
+    def get_expand_step_backup(self, core_idea: str, response: str) -> str:
         """
         从LLM的扩展步骤响应中基于核心想法提取下一步推理步骤
         
@@ -429,6 +436,95 @@ class ResponseHandler:
                 formatted_step = formatted_step.split('</step>')[0] + '</step>'
             
         return formatted_step
+
+    def get_expand_step(self, core_idea: str, response: str) -> str:
+        """
+        主方法：净化 -> 解析 -> 提取 -> 组装
+        """
+        # --- 步骤 1: 主动净化 (核心修复点) ---
+        # 在解析之前，先将原文中包含“Not terminal”的 \boxed{} 拆除
+        # 变成普通文本，防止下游工具误判
+        sanitized_response = self._sanitize_bad_boxes(response)
+
+        # --- 步骤 2: 解析 ---
+        full_step_content, check_terminal_content = self._parse_response(sanitized_response)
+        
+        # --- 步骤 3: 提取有效答案 ---
+        final_answer = self._extract_final_answer(full_step_content, check_terminal_content)
+        
+        # --- 步骤 4: 组装 ---
+        formatted_step = f"<step>\n[Core idea]: {core_idea}\n[Full step]: {full_step_content}"
+        
+        if final_answer:
+            # 只有提取到了清洗后的有效答案，才封装进 \boxed
+            formatted_step += f"\n\nThe final answer to the question is \\boxed{{{final_answer}}}"
+        
+        # --- 步骤 5: 清理标签 ---
+        formatted_step = formatted_step.replace('</step>', '').strip() + "\n</step>"
+        
+        return formatted_step
+
+    def _sanitize_bad_boxes(self, text: str) -> str:
+        """
+        核心防御机制：如果发现 \boxed{...} 里面是否定词，直接把 \boxed{}壳子 剥掉。
+        例如：\boxed{Not terminal} -> Not terminal
+        """
+        # 匹配 boxed 的正则
+        pattern = r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}'
+        
+        def replace_func(match):
+            content = match.group(1)
+            # 检查内容是否包含否定词
+            if not self._is_valid_content(content):
+                # 如果是无效内容（比如 Not terminal），只保留内容，去掉 \boxed
+                return content
+            # 如果是有效内容（比如数字或公式），保持原样
+            return match.group(0)
+            
+        return re.sub(pattern, replace_func, text)
+
+    def _extract_final_answer(self, full_text: str, check_text: str) -> Optional[str]:
+        """提取逻辑保持不变，但现在处理的是干净的文本"""
+        # 策略 1: 找 Boxed (此时剩下的 Boxed 应该都是有效的了，但为了保险依然检查)
+        combined_text = f"{check_text} {full_text}" 
+        boxed_matches = re.findall(r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}', combined_text)
+        
+        for match in boxed_matches:
+            if self._is_valid_content(match):
+                return match.strip()
+
+        # 策略 2: 救援模式 (找 "Answer is ...")
+        if check_text and self._is_valid_content(check_text):
+            rescue_pattern = r'(?i)(?:answer|result)\s*(?:is|=|:)\s*([^\.\n]+)'
+            match = re.search(rescue_pattern, check_text)
+            if match:
+                candidate = match.group(1).strip()
+                if self._is_valid_content(candidate):
+                    return candidate
+        return None
+
+    def _is_valid_content(self, content: str) -> bool:
+        """公共检查方法：判断内容是否有效（非空且不包含否定词）"""
+        if not content: return False
+        
+        # 扩大了否定词库，涵盖更多模型可能用的词
+        negative_keywords = [
+            "not a terminal", "not terminal", "not the final", "no terminal",
+            "continue", "process", "next step", "analyzing", "calculating",
+            "fail", "error", "wait"
+        ]
+        
+        c_lower = content.lower()
+        # 如果包含任何否定词，则无效
+        return not any(k in c_lower for k in negative_keywords)
+
+    def _parse_response(self, response: str) -> Tuple[str, str]:
+        """切分响应文本"""
+        split_pattern = r'(?i)(\[?\s*check\s*terminal\s*\]?)'
+        parts = re.split(split_pattern, response, maxsplit=1)
+        full_step = parts[0].strip()
+        check_content = parts[2].strip() if len(parts) > 2 else ""
+        return full_step, check_content
 
     def parse_diverse_ideas(self, response: str, num_ideas: int) -> list:
         """

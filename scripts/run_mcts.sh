@@ -2,24 +2,24 @@
 
 # 这个脚本用于运行MCTS_reasoning.py，实现基于蒙特卡洛树搜索的推理
 # 指定显卡
-export CUDA_VISIBLE_DEVICES=7
+#export CUDA_VISIBLE_DEVICES=7
 # 设置默认参数
-DATASET="Olympiadphysics"          # 数据集名称，可选：amc23, aime2024等
-#MODEL="../models/Qwen2.5-7B-Instruct"  # 模型路径或名称
+DATASET="blocksworld_local_2"          # 数据集名称，可选：amc23, aime2024等
+MODEL="../models/Qwen2.5-7B-Instruct"  # 模型路径或名称
 #MODEL="../models/Meta-Llama-3.1-8B-Instruct"  # 模型路径或名称
-MODEL="../models/Qwen3-8B"
+#MODEL="../models/Qwen3-8B"
 CASE_START=1           # 起始案例索引
-CASE_END=240            # 结束案例索引
+CASE_END=1            # 结束案例索引
 ITERATIONS=20           # MCTS迭代次数
 EXPLORATION_CONSTANT=12 # 探索常量，用于UCT公式
 BRANCH_FACTOR_INIT=3    # 初始步骤生成的分支因子，这是重复采样，因此固定种子时几乎没有意义
-BRANCH_FACTOR=4         # MCTS扩展的分支因子
-ROLLOUT_NUM=5           # 展开次数
+BRANCH_FACTOR=3         # MCTS扩展的分支因子
+ROLLOUT_NUM=3           # 展开次数
 MAX_DEPTH=10            # MCTS树的最大深度
 BALANCE_BETA=0.65       # 过程奖励和rollout奖励的加权系数 (0-1)
 RUN_MODE="async_vllm"   # 运行模式：aihub, transformer, vllm, async_vllm, debug
-PAIRWISE_WEIGHT=0      # 对比奖励信号的权重
-PROCESS_WEIGHT=0.6       # 过程评估信号的权重
+PAIRWISE_WEIGHT=0.2      # 对比奖励信号的权重
+PROCESS_WEIGHT=0.4       # 过程评估信号的权重
 ROLLOUT_WEIGHT=0.4       # rollout模拟评估信号的权重
 
 

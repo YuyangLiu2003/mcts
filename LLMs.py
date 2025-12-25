@@ -369,7 +369,7 @@ class use_async_vLLM:
         
         # 合并默认参数和传入的kwargs（传入的参数会覆盖默认值）
         params = {** defaults, **kwargs}
-        # print(f"###start asynchronous generating with vLLM (batch): {params['stop_stage']}")
+        #print(f"###start asynchronous generating with vLLM (batch): {stop_stage}")
         
         sampling_kwargs = params
         
@@ -399,31 +399,28 @@ class use_async_vLLM:
             else:
                 final_outputs = []
         
-        # 确保我们有n个输出
+        # 确保我们有n个输出 (防御性编程)
         if len(final_outputs) < params["n"]:
             print(f"Warning: Expected {params['n']} outputs, but got {len(final_outputs)}")
         
+        # --- 优化核心：统一数据处理 ---
+        
+        # 1. 提取文本 (永远是列表)
         texts = [o.text for o in final_outputs]
-        cumulative_logprob = [o.cumulative_logprob for o in final_outputs]
-        token_counts = [len(o.token_ids) for o in final_outputs]
-        confidences = [sum_p / count if count > 0 else 0.0 for sum_p, count in zip(cumulative_logprob, token_counts)]
 
-        # 根据参数调整返回值
-        n_value = params["n"]
+        # 2. 根据 confidence_tag 决定返回逻辑
         if confidence_tag:
-            if n_value == 1:
-                # n=1且需要置信度时，返回单个文本和单个置信度
-                return texts[0] if texts else "", confidences[0] if confidences else 0.0
-            else:
-                # n>1且需要置信度时，返回文本列表和置信度列表
-                return texts, confidences
+            # 只有需要置信度时才进行计算，节省资源
+            cumulative_logprob = [o.cumulative_logprob for o in final_outputs]
+            token_counts = [len(o.token_ids) for o in final_outputs]
+            confidences = [sum_p / count if count > 0 else 0.0 for sum_p, count in zip(cumulative_logprob, token_counts)]
+            
+            # 返回两个列表：([str...], [float...])
+            return texts, confidences
+        
         else:
-            if n_value == 1:
-                # n=1且不需要置信度时，返回单个文本
-                return texts[0] if texts else ""
-            else:
-                # n>1且不需要置信度时，返回文本列表
-                return texts
+            # 只返回文本列表：[str...]
+            return texts
 
 class use_debug:
     def __init__(self, model_name=None):
@@ -442,7 +439,7 @@ async def async_test():
     async_vllm = use_async_vLLM(model_name="../models/Meta-Llama-3.1-8B-Instruct")
     await async_vllm.initialize_tokenizer()
     start_time = time.time()
-    responses, confidences = await async_vllm.generate(prompt=r"""PhD is hard to get.""", max_tokens=100, n=3, stop_stage="rollout", confidence_tag=True, seed=None)
+    responses, confidences = await async_vllm.generate(prompt=r"""PhD is hard to get.""", max_tokens=100, n=4, stop_stage="rollout", confidence_tag=True, seed=None)
     print(confidences)
     for res in responses:
         print(res+"\n**************")

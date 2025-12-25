@@ -1,7 +1,7 @@
 {
   "initial_expand": {
     "prefix": "",
-    "system_prompt": "A conversation between the User and the Assistant. The user asks a question that requires a step-by-step solution. The Assistant provides only the first step, including the core idea of this step and then its full content. The step must be marked with <step></step> at the beginning and end. Format requirement: <step>\n[Core idea]: xxx\n[Full step]: xxxxxx\n</step>\n\n",
+    "system_prompt": "A conversation between the User and the Assistant. The user asks a question that requires a step-by-step solution. The Assistant provides only the first step, including the core idea of this step and then its full content. [init_expand_guidance]\nThe step must be marked with <step></step> at the beginning and end. Format requirement: <step>\n[Core idea]: xxx\n[Full step]: xxxxxx\n</step>\n\n",
     "user_prompt": "User question: [user question]",
     "suffix": "Answer: <step>\n[Core idea]: "
   },
@@ -32,7 +32,7 @@
   "reward_evaluation":{
     "prefix": "[full solution]\n",
     "system_prompt": "",
-    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10 (0 means the solution is extremely poor, 5 means average, 10 means the solution is perfectly done). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 10)\n</evaluation>\n",
+    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10 (0 means the solution is riddled with critical errors, 5 means the solution contains noticeable flaws, 10 means no errors, violations, or potential risks can be detected). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 10)\n</evaluation>\n",
     "suffix": "<evaluation>\n[Analysis]:"
   },
   "pair_evaluation":{

@@ -1,14 +1,16 @@
 
 {
     "default": {
+        "init_expand_guidance": "",
         "idea_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
         "expand_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer. Don't give any code.",
         "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
         "pairwise_criterions": "1. Is the solution more reliable than the previous one\n2. Is the solution more accurate than the previous one",
-        "reward_objectives": "1. Does the solution violate any known conditions\n2. Is the answer correct? (most important). If there is no definite answer, give a low score.\n3. Are there any obvious errors or format disorder",
+        "reward_objectives": "1. Critical Failure Check: Does the solution reach a wrong conclusion? If yes, the score must be low regardless of the process.\n2. Reasoning Flaws: Look for intermediate errors. Penalize logical leaps, algebraic mistakes, or hallucinated facts even if the final answer appears correct by chance.\n3. Condition Negligence: Deduct points if the solution ignores specific variable ranges, units, or definitions provided in the prompt.\n4. Structural Disorder: Reduce the score for poor readability, such as broken equations, unclosed brackets, or incoherent text structure.",
         "answer_restrictions": "1. The answer must be in the format of a number\n2. The answer must be a valid number"
     },
     "Olympiadphysics": {
+        "init_expand_guidance": "",
         "idea_guidance": "For complex problems, each step can be divided into more detailed sub-steps to avoid excessive computational load. If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
         "expand_guidance": "In the full step, all calculations must be carried out instead of only providing formulas. If there are any uncalculated formulas remaining from the previous step, complete their calculations first before proceeding to the next step of the solution. Don't generate any code.",
         "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
@@ -16,7 +18,8 @@
         "reward_objectives": "1. Does the solution violate any known conditions given in the question?\n2. Look back into question, is the answer correct? (most important). If there is no definite answer, give a low score.\n3. Are there any obvious errors or format disorder?",
         "answer_restrictions": "1. The answer must be a mathematical expression or a specific numerical value.\n2. Keep the answer concise."
     },
-    "GPQA-Diamond": {
+    "GPQA-Diamond_v0": {
+        "init_expand_guidance": "",
         "idea_guidance": "Consider multiple steps to solve the problem.",
         "expand_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
         "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
@@ -24,12 +27,22 @@
         "reward_objectives": "1. Does the solution violate any known conditions\n2. Is the answer correct? (most important). If there is no definite answer, give a low score.\n3. The answer must be a choice from A, B, C, D",
         "answer_restrictions": "1. The answer must be a choice from A, B, C, D, like \\boxed{A, B, C, D}\n2. If the answer does not conform to any of the items A, B, C, or D, select the most reasonable one based on the question and the solution."
     },
-    "blocksworld": {
+    "GPQA-Diamond": {
+        "init_expand_guidance": "",
         "idea_guidance": "Consider multiple steps to solve the problem.",
         "expand_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
-        "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
-        "pairwise_criterions": "1. Is the solution more reliable than the previous one?\n2. Is the solution more helpful to solve the problem than the previous one?",
-        "reward_objectives": "1. Does the solution violate any known conditions\n2. Is the answer correct? (most important). If there is no definite answer, give a low score.\n3. The answer must be a choice from A, B, C, D",
+        "process_criterions": "1. Identify and penalize any factual hallucinations, formula misuse, or calculation errors in the current step (Critical).\n2. Detect logical disconnects: does this step fail to strictly adhere to the scientific context or the previous step's conclusion?",
+        "pairwise_criterions": "1. Which solution contains more factual inaccuracies or logical fallacies? Penalize the worse one.\n2. Identify which solution relies on weaker assumptions or exhibits more ambiguity in its scientific reasoning.",
+        "reward_objectives": "1. Severe penalty if the final selected option is incorrect or contradicts the derived reasoning steps.\n2. Detect format violations: if the final answer is not strictly a single choice from A, B, C, or D, assign a low score.\n3. Scrutinize for any violation of the problem's boundary conditions or domain-specific scientific laws.",
         "answer_restrictions": "1. The answer must be a choice from A, B, C, D, like \\boxed{A, B, C, D}\n2. If the answer does not conform to any of the items A, B, C, or D, select the most reasonable one based on the question and the solution."
+    },
+    "blocksworld_local_2": {
+        "init_expand_guidance": "In the [Core idea] section, you must propose a single action strictly adhering to one of these four formats: 'pick up the xxx block', 'put down the xxx block', 'stack the xxx block on top of the yyy block', or 'unstack the xxx block from on top of the yyy block' (where xxx and yyy are the specific block colors). In the [Full step] section, you must first verify the legality of this action against current constraints (e.g., hand status, block clarity), and then explicitly describe the new 'Current State' resulting from this action, detailing the updated location of every block and the status of the hand.",
+        "idea_guidance": "Propose the next step strictly using one of these four formats: 1. 'pick up the xxx block', 2. 'put down the xxx block', 3. 'stack the xxx block on top of the yyy block', 4. 'unstack the xxx block from on top of the yyy block'. Here, 'xxx' and 'yyy' represent the specific colors of the blocks available in the current context.",
+        "expand_guidance": "1. Primary Objective: Explicitly derive and describe the new 'Current State' resulting from the execution of the proposed action (e.g., update which block is on the table, which is clear, and what is in the hand). 2. Secondary Objective: Verify the legality of the action based on the pre-action state (e.g., was the hand empty? was the block clear?). 3. If the current step has achieved the goal, please output \\boxed{goal achieved}",
+        "process_criterions": "1. Strict Legality Check (Critical): Assign a low score if the step is physically impossible (e.g., unstacking a block that has another block on top of it, or picking up a block while the hand is already full).\n2. Goal Orientation: Evaluate if the step contributes to the goal state. Penalize steps that reverse progress or create unnecessary stacks unrelated to the goal.",
+        "pairwise_criterions": "1. Error Comparison: Which action sequence contains fewer violations of physical constraints or logical fallacies? Penalize the one with errors.\n2. Strategic Value: Compare which action effectively moves a block to its final goal position or clears a necessary block, versus a neutral or counter-productive move.",
+        "reward_objectives": "1. Goal Verification: Return 0 if the final state does not perfectly match the required goal configuration (e.g., specific A on B relations).\n2. Constraint Integrity: Apply a severe penalty if any action within the solution history violates the domain rules (illegal moves).",
+        "answer_restrictions": "1. The final output must be a sequence of valid legal actions enclosed in parentheses.\n2. Do not add explanation text or numbering outside the parentheses.\n3. Example 1: (unstack the red block from on top of the blue block)(put down the red block)(pick up the blue block)(stack the blue block on top of the yellow block)\n Example 2: (pick up the yellow block)(stack the yellow block on top of the red block)"
     }
 }

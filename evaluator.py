@@ -26,10 +26,10 @@ class RewardModel:
         使用LLM评估答案质量
         """
         prompt = self.prompt_handler.get_reward_prompt(full_solution, objectives)
-        response = await self.llm_client.generate(prompt,
+        response = (await self.llm_client.generate(prompt,
                                                 stop_stage='reward',
                                                 skip_special_tokens=False,
-                                                max_tokens=2048)
+                                                max_tokens=2048))[0]
         score = self.response_handler.parse_reward_response(response)
         if return_response:
             return score, prompt, response
@@ -56,9 +56,9 @@ class ProcessRewardModel:
         使用LLM评估中间节点质量
         """
         prompt = self.prompt_handler.get_process_evaluation_prompt(previous_steps, current_step, process_criterions)
-        response = await self.llm_client.generate(prompt,
+        response = (await self.llm_client.generate(prompt,
                                                 stop_stage='process_evaluation',
-                                                skip_special_tokens=False)
+                                                skip_special_tokens=False))[0]
         score = self.response_handler.parse_process_evaluation_response(response)
         if return_response:
             return score, prompt, response
@@ -116,9 +116,7 @@ class PairwiseRewardModel:
             pair["stepB"], 
             process_criterions
         )
-        response = await self.llm_client.generate(prompt,
-                                                stop_stage='pair_evaluation',
-                                                skip_special_tokens=False,)
+        response = (await self.llm_client.generate(prompt, stop_stage='pair_evaluation', skip_special_tokens=False,))[0]
         score = self.response_handler.parse_pair_evaluation_response(response)
         pair["score"] = score
         pair["prompt"] = prompt
@@ -218,17 +216,100 @@ class PairwiseRewardModel:
         # Convert numpy array to list of floats
         return final_score.tolist()
 
-    async def pairwise_evaluate(self, previous_steps: str, new_nodes: List[Any], process_criterions: str, case_idx: int = None) -> List[float]:
+    def get_borda_score(self, pairs: List[Dict[str, Any]], num_nodes: int, 
+                        mode: str = "weighted", 
+                        temperature: float = 2.0) -> List[float]:
         """
-        外部调用的方法，执行成对比较评估
+        Args:
+            temperature: 控制分数分布的集中程度 (仅用于 weighted 模式)
+                         - T=1.0: 标准 Sigmoid，+3分对应 9.5分 (较陡)
+                         - T=2.0: 柔和，+3分对应 8.1分 (推荐，符合你 2-8 的需求)
+                         - T=3.0: 非常柔和，+5分才对应 8.4分
+        """
+        import numpy as np
+        
+        points = np.zeros(num_nodes, dtype=np.float64)
+        match_counts = np.zeros(num_nodes, dtype=np.float64)
+        epsilon = 1e-6
+        
+        for pair in pairs:
+            idx_a = pair.get("nodeA_idx")
+            score = pair.get("score", 0) # 假设原始 score 范围是 -5 到 +5
+            
+            if idx_a is not None and idx_a < num_nodes:
+                match_counts[idx_a] += 1
+                
+                if mode == "discrete":
+                    # 离散模式逻辑不变
+                    if score > epsilon: points[idx_a] += 1.0
+                    elif score < -epsilon: points[idx_a] += 0.0
+                    else: points[idx_a] += 0.5
+                
+                elif mode == "weighted":
+                    # 加权模式：累加原始分差
+                    # 我们可以稍微 clamp 一下防止极端脏数据，比如 -10 到 10
+                    points[idx_a] += np.clip(score, -10, 10)
+
+        final_scores = []
+        for i in range(num_nodes):
+            if match_counts[i] > 0:
+                avg_val = points[i] / match_counts[i]
+                
+                if mode == "discrete":
+                    # 离散模式：线性压缩 (Linear Compression)
+                    # 原始是 0-1 (即0-10分)。
+                    # 为了让它柔和，我们可以把 0.0-1.0 映射到 2.0-8.0
+                    # 公式: 2 + (win_rate * 6)
+                    # 如果你非常想保留0和10的可能性，这里比较难，建议用 weighted 模式
+                    win_rate = avg_val
+                    # 这种映射让 0%胜率=2分，100%胜率=8分
+                    normalized_score = 2.0 + (win_rate * 6.0) 
+                    
+                else: # mode == "weighted" (推荐)
+                    # Sigmoid 映射
+                    # avg_val 是平均优势分 (例如 +3.5)
+                    # 公式: 10 / (1 + exp(-x/T))，这个公式满足均值为5
+                    normalized_score = 10 / (1 + np.exp(-avg_val / temperature))
+            else:
+                normalized_score = 5.0 # 无数据默认为中位数
+            
+            # 截断并保留小数
+            final_scores.append(float(np.clip(round(normalized_score, 4), 0, 10)))
+            
+        return final_scores
+
+    async def pairwise_evaluate(self, previous_steps: str, new_nodes: List[Any], 
+                              process_criterions: str, case_idx: int = None,
+                              score_method: str = 'borda_weighted') -> Tuple[List[float], List[Dict[str, Any]]]:
+        """
+        Args:
+            score_method: 
+                - 'bradley_terry': 使用 BT 模型
+                - 'borda_discrete': 使用胜负平积分 (推荐，更稳健)
+                - 'borda_weighted': 使用分差积分 (更能体现差距)
         """
         pairs = self._get_pairs(new_nodes)
-        evaluated_pairs = []
+        
+        # ... (并发执行 pair_comparison 逻辑保持不变) ...
         if pairs:
-            comparison_tasks = [
+             comparison_tasks = [
                 self._pair_comparison(previous_steps, pair, process_criterions, case_idx)
                 for pair in pairs
             ]
-            evaluated_pairs = await asyncio.gather(*comparison_tasks)
-        node_adv_scores = self._get_bradley_terry_score(evaluated_pairs, len(new_nodes))
+             evaluated_pairs = await asyncio.gather(*comparison_tasks)
+        else:
+             evaluated_pairs = []
+
+        # 根据方法选择计算逻辑
+        if score_method == 'borda_weighted':
+            # 假设你的 Prompt 定义分数范围是 -5 到 5
+            node_adv_scores = self.get_borda_score(evaluated_pairs, len(new_nodes), 
+                                                 mode="weighted")
+        elif score_method == 'borda_discrete':
+            node_adv_scores = self.get_borda_score(evaluated_pairs, len(new_nodes), 
+                                                 mode="discrete")
+        else:
+            # 默认 Bradley-Terry
+            node_adv_scores = self._get_bradley_terry_score(evaluated_pairs, len(new_nodes))
+            
         return node_adv_scores, evaluated_pairs

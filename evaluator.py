@@ -80,9 +80,11 @@ class PairwiseRewardModel:
         self.response_handler = response_handler
         self.dataset_name = dataset_name
 
+    from typing import List, Dict, Any
+
     def _get_pairs(self, new_nodes: List[Any]) -> List[Dict[str, Any]]:
         """
-        对于所有输入的new_nodes，构成两两比较对
+        对于所有输入的new_nodes，构成两两比较对（无顺序的组合，非排列）
         
         Args:
             new_nodes: 新生成的节点列表
@@ -92,17 +94,20 @@ class PairwiseRewardModel:
         pairs = []
         n = len(new_nodes)
         
+        # 组合逻辑：i < j 确保每对只生成一次（无顺序）
         for i in range(n):
-            for j in range(n):
-                if i != j:  # 排除自身与自身的配对
-                    pair = {
-                        "stepA": new_nodes[i].state,
-                        "stepB": new_nodes[j].state,
-                        "score": 0,
-                        "nodeA_idx": i,
-                        "nodeB_idx": j
-                    }
-                    pairs.append(pair)
+            # 内层循环从i+1开始，避免重复配对和自身配对
+            for j in range(i + 1, n):
+                pair = {
+                    "idx_a": i,          # <--- 必须添加这个
+                    "idx_b": j,          # <--- 必须添加这个
+                    "stepA": new_nodes[i].state,
+                    "stepB": new_nodes[j].state,
+                    "score": 0,
+                    "nodeA_idx": i,
+                    "nodeB_idx": j
+                }
+                pairs.append(pair)
         
         return pairs
 

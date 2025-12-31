@@ -26,25 +26,25 @@
   "process_evaluation":{
     "prefix": "[previous steps]\n",
     "system_prompt": "",
-    "user_prompt": "Please evaluate the quality of the current step based on the process criterions ([process criterions]), and then give a score from 0 to 10 (0 means the step is extremely poor, 5 means average, 10 means the step is perfectly good). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 10)\n</evaluation>\n\nThe current step is: [current step]\n",
+    "user_prompt": "Please evaluate the quality of the current step based on the process criterions ([process criterions]), and then give a score from 0 to 10.\n\n**Scoring Standard:**\n0 means the step is riddled with critical errors, hallucinations, or logic gaps.\n5 means the step contains noticeable flaws or overlooks constraints.\n10 means no errors, violations, or potential risks can be detected.\n\nStrictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 10)\n</evaluation>\n\nThe current step is: [current step]\n",
     "suffix": "<evaluation>\n[Analysis]:"
   },
   "reward_evaluation":{
     "prefix": "[full solution]\n",
     "system_prompt": "",
-    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10 (0 means the solution is riddled with critical errors, 5 means the solution contains noticeable flaws, 10 means no errors, violations, or potential risks can be detected). Strictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 10)\n</evaluation>\n",
+    "user_prompt": "Please evaluate the quality of the above solution based on the objectives of solving the problem ([objectives]), and then give a score from 0 to 10.\n\n**Scoring Standard:**\n0 means the solution is riddled with critical errors, 5 means the solution contains noticeable flaws, 10 means no errors, violations, or potential risks can be detected.\n\nStrictly provide your evaluation in the following format:\n<evaluation>\n[Analysis]: Evaluate and briefly analyze how well the solution meets the objectives\n[Score]: X (where X is a number from 0 to 10)\n</evaluation>\n",
     "suffix": "<evaluation>\n[Analysis]:"
   },
   "pair_evaluation":{
     "prefix": "[previous steps]\n",
     "system_prompt": "",
-    "user_prompt": "Please compare the quality of Step A and Step B based on the process criterions ([pairwise criterions]), first conduct an in-depth analysis of their quality differences, and then evaluate which is better(A, B, or Tied), give a Score that reflects how much better (0 means tied, 5 means much better). Strictly provide your comparison result in the following format:\n<comparison>\n[Analysis]: Compare and briefly analyze the performance of Step A and Step B in meeting the process criterions respectively, focus on pointing out the advantages and disadvantages of Step A relative to Step B.\n[The better step]: A or B or Tied\n[Score]: X (where X is an integer from 0 to 5)\n</comparison>\nThe Step A is: [Step A]\n\nThe Step B is: [Step B]\n\n",
+    "user_prompt": "Please compare the quality of Step A and Step B based on the process criterions ([pairwise criterions]).First, conduct an in-depth analysis of their flaws and potential risks, and then evaluate which is better (A, B, or Tied). Give a Score that reflects the difference in error density.\n\n**Scoring Standard:**\n0 means both steps have a similar amount of errors or flaws (Tied).\n5 means the better step is significantly more rigorous and contains far fewer errors or risks than the other.\n\nStrictly provide your comparison result in the following format:\n<comparison>\n[Analysis]: Compare and briefly analyze the performance of Step A and Step B in meeting the process criterions respectively, focus on pointing out the advantages and disadvantages of Step A relative to Step B.\n[The better step]: A or B or Tied\n[Score]: X (where X is an integer from 0 to 5)\n</comparison>\nThe Step A is: [Step A]\n\nThe Step B is: [Step B]\n\n",
     "suffix": "<comparison>\n[Analysis]:"
   },
   "best_answer":{
     "prefix": "",
     "system_prompt": "",
-    "user_prompt": "[best solution]\nPlease provide your final answer based on the complete solution outlined above. If the above ideas haven't yet led to a final solution, please provide your final answer directly.\n[answer restrictions]Please strictly follow the formatting requirements and place your final answer in the \\boxed{Final Answer}.",
+    "user_prompt": "[best solution]\nPlease provide your final answer based on the complete solution outlined above. If the above ideas haven't yet led to a final solution, please provide your final answer directly.\n[answer restrictions]Please strictly follow the formatting requirements and place your final answer in the \\boxed{...}.",
     "suffix": "The final answer is: \\boxed{"
   }
 }

@@ -7,25 +7,34 @@
         "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
         "pairwise_criterions": "1. Is the solution more reliable than the previous one\n2. Is the solution more accurate than the previous one",
         "reward_objectives": "1. Critical Failure Check: Does the solution reach a wrong conclusion? If yes, the score must be low regardless of the process.\n2. Reasoning Flaws: Look for intermediate errors. Penalize logical leaps, algebraic mistakes, or hallucinated facts even if the final answer appears correct by chance.\n3. Condition Negligence: Deduct points if the solution ignores specific variable ranges, units, or definitions provided in the prompt.\n4. Structural Disorder: Reduce the score for poor readability, such as broken equations, unclosed brackets, or incoherent text structure.",
+        "answer_restrictions": "1. The answer must be a concise, definitive value or statement.\n2. Avoid ambiguity; if multiple interpretations exist, justify the choice."
+    },
+    "amc23": {
+        "init_expand_guidance": "",
+        "idea_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
+        "expand_guidance": "Perform calculations step-by-step to avoid arithmetic errors. If using a theorem, verify its conditions first. Double-check algebraic signs and unit consistency. Don't give any code. Don't give any code.",
+        "process_criterions": "1. Scrutinize for arithmetic errors, algebraic slip-ups, or misuse of mathematical theorems in the current step.\n2. Check if the step ignores problem constraints (e.g., 'distinct integers', 'positive numbers'). Penalize with a low score if ignored.",
+        "pairwise_criterions": "1. Which solution exhibits more calculation errors or looser reasoning?\n2. Identify which solution fails to consider edge cases (e.g., division by zero, boundary values) compared to the other.",
+        "reward_objectives": "1. Incorrect Final Answer: If the final numerical answer is wrong, the score must be 0 or extremely low.\n2. Reasoning Flaws: Look for intermediate errors. Penalize logical leaps, algebraic mistakes, or hallucinated facts even if the final answer appears correct by chance.\n3. Condition Negligence: Deduct points if the solution ignores specific variable ranges, units, or definitions provided in the prompt.",
         "answer_restrictions": "1. The answer must be in the format of a number\n2. The answer must be a valid number"
+    },
+    "math500": {
+        "init_expand_guidance": "",
+        "idea_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
+        "expand_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer. Don't give any code.",
+        "process_criterions": "1. Identify any algebraic manipulation errors, sign errors, or undefined operations.\n2. Detect logical disconnects: does the current step logically follow from the previous derivation?",
+        "pairwise_criterions": "1. Which solution contains more algebraic mistakes or notation errors?\n2. Identify which solution is less concise or uses a more convoluted method prone to calculation errors.",
+        "reward_objectives": "1. Critical Failure Check: Does the solution reach a wrong conclusion? If yes, the score must be low regardless of the process.\n2. Reasoning Flaws: Look for intermediate errors. Penalize logical leaps, algebraic mistakes, or hallucinated facts even if the final answer appears correct by chance.\n3. Condition Negligence: Deduct points if the solution ignores specific variable ranges, units, or definitions provided in the prompt.\n4. Structural Disorder: Reduce the score for poor readability, such as broken equations, unclosed brackets, or incoherent text structure.",
+        "answer_restrictions": "1. The answer could be a mathematical expression (fractions, roots...), a specific number, a coordinate, or an expression.\n2. If the answer is complete, avoid altering it."
     },
     "Olympiadphysics": {
         "init_expand_guidance": "",
         "idea_guidance": "For complex problems, each step can be divided into more detailed sub-steps to avoid excessive computational load. If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
-        "expand_guidance": "In the full step, all calculations must be carried out instead of only providing formulas. If there are any uncalculated formulas remaining from the previous step, complete their calculations first before proceeding to the next step of the solution. Don't generate any code.",
-        "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
-        "pairwise_criterions": "1. Is the solution more reliable than the previous one\n2. Is the solution more accurate than the previous one",
-        "reward_objectives": "1. Does the solution violate any known conditions given in the question?\n2. Look back into question, is the answer correct? (most important). If there is no definite answer, give a low score.\n3. Are there any obvious errors or format disorder?",
+        "expand_guidance": "In the full step, all calculations must be carried out instead of only providing formulas. Do not skip integration or differentiation steps. If there are any uncalculated formulas remaining from the previous step, complete their calculations first before proceeding to the next step of the solution. Don't generate any code.",
+        "process_criterions": "1. Identify violations of physical laws (e.g., Conservation of Energy/Momentum) or incorrect application of formulas.\n2. Check for dimensional inconsistency (units do not match) or calculus errors (wrong integration/differentiation limits). Penalize with a low score if it does.",
+        "pairwise_criterions": "1. Which solution makes invalid physical approximations or assumes conditions not stated in the problem?\n2. Identify which solution has more algebraic errors or incorrectly substitutes numerical values.",
+        "reward_objectives": "1. Physical Validity Check: Is the answer physically impossible (e.g., speed > c, negative mass)? If yes, score 0.\n2. Accuracy of Answer: If the numerical magnitude or mathematical expression is incorrect, give a low score.\n3. Derivation Errors: Penalize if the correct answer was derived using wrong physics principles (right answer, wrong method).\n4. If there is no complete answer, give a low score. Don't solve the problem by yourself.",
         "answer_restrictions": "1. The answer must be a mathematical expression or a specific numerical value.\n2. Keep the answer concise."
-    },
-    "GPQA-Diamond_v0": {
-        "init_expand_guidance": "",
-        "idea_guidance": "Consider multiple steps to solve the problem.",
-        "expand_guidance": "If the conditions are sufficient, consider requesting to finish the solution and return the final answer.",
-        "process_criterions": "1. Is there any obvious error (most important)\n2. Does it help solve the question",
-        "pairwise_criterions": "1. Is the solution more reliable than the previous one?\n2. Is the solution more helpful to solve the problem than the previous one?",
-        "reward_objectives": "1. Does the solution violate any known conditions\n2. Is the answer correct? (most important). If there is no definite answer, give a low score.\n3. The answer must be a choice from A, B, C, D",
-        "answer_restrictions": "1. The answer must be a choice from A, B, C, D, like \\boxed{A, B, C, D}\n2. If the answer does not conform to any of the items A, B, C, or D, select the most reasonable one based on the question and the solution."
     },
     "GPQA-Diamond": {
         "init_expand_guidance": "",

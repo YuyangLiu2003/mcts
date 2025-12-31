@@ -33,7 +33,6 @@ class ReasoningNode:
         # 从 Node 类继承的属性
         self.state = state         # 当前状态
         self.parent = parent       # 父节点
-        self.action = action       # 使该节点产生的动作
         self.children = []         # 孩子节点列表
         self.visits = 0            # 节点被访问的次数
         self.value = 0.0           # 累计奖励（价值）
@@ -44,11 +43,7 @@ class ReasoningNode:
         self.response = None  # 存储LLM的响应
         self.is_final = False  # 标记是否为终止节点
         self.full_context = ""  # 新增：完整的上下文（包含所有父节点内容）
-        
-        # 新增属性：子节点统计信息
-        self.child_mean = 0.0      # 所有子节点的value均值
-        self.child_diff = 1.0      # 所有子节点的value方差
-        
+
         # 新增属性：节点深度
         self.depth = self._calculate_depth()
     
@@ -119,41 +114,6 @@ class ReasoningNode:
             return self.full_context
         return self.parent.full_context
 
-    def is_leaf(self):
-        # 当节点没有孩子时，认为是叶子节点
-        return len(self.children) == 0
-
-    def update_child_statistics(self):
-        """
-        更新子节点的统计信息（均值和方差）
-        当子节点的value发生变化时调用此方法
-        """
-        if not self.children:
-            self.child_mean = 0.0
-            self.child_diff = 1.0
-            return
-        
-        # 计算子节点value的均值，过滤掉visits为0的节点
-        values = []
-        for child in self.children:
-            if child.visits > 0:
-                values.append(child.value / child.visits)
-        
-        if not values:
-            # 如果所有子节点的visits都为0，设置默认值
-            self.child_mean = 0.0
-            self.child_diff = 1.0
-            return
-        
-        # 计算子节点value的均值
-        self.child_mean = sum(values) / len(values)
-        
-        # 计算子节点value的方差
-        if len(values) > 1:
-            variance = sum((x - self.child_mean) ** 2 for x in values) / len(values)
-            self.child_diff = variance
-        else:
-            self.child_diff = 1.0
 
 class MCTS_Reasoner:
     def __init__(self, question: str, reward_model: Any, process_reward_model: Any, pairwise_reward_model: Any,
@@ -162,7 +122,12 @@ class MCTS_Reasoner:
                  rollout_num: int = 1, exploration_constant: float = 3, 
                  show_runtime: bool = True, verbose: bool = True,
                  max_depth: int = 5, branch_factor: int = 3, branch_factor_init: Any = None,
-                 balance_beta: float = 0.5, rollout_weight: float = 0.3, process_weight: float = 0.4, pairwise_weight: float = 0.3):
+                 leaf_value_weight: float = 0.2,  # <-- 新增
+                 path_value_weight: float = 0.2,   # <-- 新增
+                 leaf_confidence_weight: float = 0.6, # <-- 新增
+                 rollout_weight: float = 0.3, process_weight: float = 0.4, pairwise_weight: float = 0.3,
+                 rollout_sc_weight: float = 0.0, 
+                 rollout_confidence_weight: float = 0.0):
         """
         初始化MCTS推理器
         """
@@ -187,17 +152,22 @@ class MCTS_Reasoner:
         self.max_depth = max_depth
         self.branch_factor = branch_factor
         self.branch_factor_init = branch_factor_init if branch_factor_init is not None else branch_factor
-        self.balance_beta = balance_beta  # 保留参数以保持向后兼容
         
         # 新增：各种奖励权重参数
         self.rollout_weight = rollout_weight  # 路径奖励权重
         self.process_weight = process_weight  # 过程奖励权重
         self.pairwise_weight = pairwise_weight  # 对比奖励权重
-        self.rollout_sc_weight = 0
-        self.rollout_confidence_weight = 0
+        self.rollout_sc_weight = rollout_sc_weight
+        self.rollout_confidence_weight = rollout_confidence_weight
+
+        # 选择答案时候的权重
+        self.leaf_value_weight = leaf_value_weight
+        self.path_value_weight = path_value_weight
+        self.leaf_confidence_weight = leaf_confidence_weight
         
         # 从Search_Guide中加载各种引导信息
         self.search_guide_handler = search_guide_handler
+        self.init_expand_guidance = self.search_guide_handler.get_init_expand_guidance()
         self.idea_guidance = self.search_guide_handler.get_idea_guidance()
         self.expand_guidance = self.search_guide_handler.get_expand_guidance()
         self.process_criterions = self.search_guide_handler.get_process_criterions()
@@ -229,7 +199,7 @@ class MCTS_Reasoner:
         封装初始扩展逻辑：生成初始prompt，调用LLM，并创建第一层子节点
         """
         # 使用initial_step模板进行第一次展开
-        prompt = self.prompt_handler.get_init_prompt(self.question)
+        prompt = self.prompt_handler.get_init_prompt(self.question, self.init_expand_guidance)
         
         # 高温度采样使得模型有一些变数
         responses = await self.llm_client.generate(
@@ -275,7 +245,6 @@ class MCTS_Reasoner:
                 "visits": 0,
                 "value": 0.0,
                 "is_final": new_node.is_final,
-                "full_context": new_node.full_context
             }
             
         return initial_nodes
@@ -384,11 +353,15 @@ class MCTS_Reasoner:
         # 选择最优路径
         best_path, best_solution, answer_frequency = self._pick_final_answer(root)
         
+        # [新增] 在调用output_best_answer前，先从best_solution中直接抽取答案
+        extracted_answer = self._extract_answer_from_response(best_solution)
+
         # 生成最终答案
         final_answer = await self._output_best_answer(best_solution)
 
         self.tree_log['final_results'] = {
             "ground_truth": self.ground_truth,
+            "extracted_answer": extracted_answer,  # [新增] 写入抽取出的答案
             "final_answer": final_answer,
             "answer_frequency": answer_frequency,
             "best_path": best_path,
@@ -410,9 +383,6 @@ class MCTS_Reasoner:
         while node.children:
             parent_coords = node.coordinates
             test_out("selection_at_node", f"parent={parent_coords}, visits={node.visits}, children={len(node.children)}", self.case_idx, self.dataset_name)
-
-            # 确保子节点统计量为最新
-            node.update_child_statistics()
 
             best_score = float('-inf')
             best_child = None
@@ -491,20 +461,24 @@ class MCTS_Reasoner:
 
             # Step A: 生成路径 (根据是否需要置信度分支处理)
             if target_node.is_final:
-                paths = [target_node.get_full_reasoning_path()]
-                # Final 节点通常不涉及 Rollout 置信度生成，保持 avg_path_con = 0.0 即可
+                final_path_str = target_node.get_full_reasoning_path()
+                # 这样后续的遍历循环就会生成 rollout_num 个评估任务
+                paths = [final_path_str] * 3
+                # 这里暂时给 3.0 作为 "无信息时的默认值"
+                avg_path_con = 3.0 
             else:
-                # [Mod] 根据权重决定是否开启 confidence_tag
                 if self.rollout_confidence_weight != 0:
                     paths, path_con_scores = await self._rollout_paths(target_node, confidence_tag=True)
-                    # print(f"Node {target_node.coordinates} rollout num: {len(paths)}")
-                    # print("calculating paths confidences")
                     
-                    # [Mod] 计算平均置信度
+                    # [Mod] path_con_scores 列表里通常是 log probabilities (负数)
                     if path_con_scores:
-                        avg_path_con = sum(path_con_scores) / len(path_con_scores)
-                    
-                    test_out("rollout_con_score", f"{avg_path_con:.6f}", self.case_idx, self.dataset_name)
+                        # 1. 对每个 log_prob 取 exp 变成概率 (0-1)
+                        # 2. 乘以 10 映射到 (0-10)
+                        # 3. 取平均
+                        probs_0_10 = [math.exp(score) * 10.0 for score in path_con_scores]
+                        avg_path_con = sum(probs_0_10) / len(probs_0_10)
+                    else:
+                        avg_path_con = 3.0 # 或者 5.0
                 else:
                     paths = await self._rollout_paths(target_node)
             
@@ -513,7 +487,7 @@ class MCTS_Reasoner:
 
             # [Mod] 计算 Self-Consistency Score (SC)
             sc_score = self._get_avg_sc_score(paths)
-            test_out("rollout_sc_score", f"{sc_score:.6f}", self.case_idx, self.dataset_name)
+            #test_out("rollout_sc_score", f"{sc_score:.6f}", self.case_idx, self.dataset_name)
 
             # 如果 Rollout 评估权重为 0，就不需要跑昂贵的评估模型了，返回 (0, sc, con)
             if self.rollout_weight == 0:
@@ -551,7 +525,7 @@ class MCTS_Reasoner:
             )
             
             #test_out("process_prompt", p_prompt, self.case_idx, self.dataset_name)
-            test_out(f"Node {target_node.coordinates}: process_res", p_response, self.case_idx, self.dataset_name)
+            test_out(f"Node {target_node.coordinates}: process_eval", p_response, self.case_idx, self.dataset_name)
             test_out("process_score", f"{p_reward:.6f}", self.case_idx, self.dataset_name)
             return p_reward
 
@@ -597,10 +571,41 @@ class MCTS_Reasoner:
         
         pairwise_scores = [0.0] * len(new_nodes)
         if pairwise_task:
+            # 获取 pairwise_evaluate 返回的元组 (scores, details_list)
             pw_result = pairwise_task.result()
-            pairwise_scores = pw_result[0]
-            pw_details = pw_result[1] 
-            # test_out("pairwise_details", pw_details, self.case_idx, self.dataset_name)
+            pairwise_scores = pw_result[0]  # List[float]: 每个节点的最终得分
+            evaluated_pairs = pw_result[1]  # List[Dict]: 每一对比较的详细信息
+            
+            # === [新增日志逻辑] 记录 Pairwise 详细过程 ===
+            
+            # 1. 记录每一对比较的详情 (Coordinates, Score, Response)
+            for i, pair in enumerate(evaluated_pairs):
+                # 获取比较对中两个节点的索引 (请确保 _get_pairs 方法中存入了 idx_a, idx_b)
+                # 如果你的 _get_pairs 使用的是 index_1/index_2，请相应修改这里的 key
+                idx_a = pair.get('idx_a') 
+                idx_b = pair.get('idx_b')
+                
+                # 安全检查：确保索引存在且未越界
+                if idx_a is not None and idx_b is not None and idx_a < len(new_nodes) and idx_b < len(new_nodes):
+                    coord_a = new_nodes[idx_a].coordinates
+                    coord_b = new_nodes[idx_b].coordinates
+                    
+                    log_content = (
+                        f"Comparison Pair {i+1}:\n"
+                        f"  Node A ({coord_a}) vs Node B ({coord_b})\n"
+                        f"  Extracted Score: {pair.get('score')}\n"
+                        f"  LLM Response: {pair.get('response')}"
+                    )
+                    
+                    # 使用 test_out 写入日志
+                    test_out(f"pairwise_detail_{coord_a}_vs_{coord_b}", log_content, self.case_idx, self.dataset_name)
+            
+            # 2. 记录最终聚合分数 (Node Adv Scores)
+            # 构建一个 {坐标: 分数} 的映射字符串
+            scores_map = {node.coordinates: round(score, 4) for node, score in zip(new_nodes, pairwise_scores)}
+            test_out("pairwise_final_scores", f"Aggregated Scores: {scores_map}", self.case_idx, self.dataset_name)
+            
+            # === [日志逻辑结束] ===
 
         for i, node in enumerate(new_nodes):
             p_score = process_tasks[i].result()
@@ -620,6 +625,15 @@ class MCTS_Reasoner:
             )
             
             self.tree_log["nodes"][node.coordinates]["value"] = final_reward
+
+            # [新增] 记录详细的信号分量和权重
+            self.tree_log["nodes"][node.coordinates]["signals"] = {
+                "process": {"score": p_score, "weight": self.process_weight},
+                "rollout": {"score": r_score, "weight": self.rollout_weight},
+                "pairwise": {"score": pw_score, "weight": self.pairwise_weight},
+                "self_consistency": {"score": sc_score, "weight": self.rollout_sc_weight},
+                "confidence": {"score": con_score, "weight": self.rollout_confidence_weight}
+            }
             
             # [Mod] 更新日志显示 SC 和 Confidence 分数
             node_rewards_log = (f"final={final_reward:.6f} "
@@ -700,7 +714,6 @@ class MCTS_Reasoner:
             "visits": 0,
             "value": 0.0,
             "is_final": new_node.is_final,
-            "full_path": new_node.full_context  # 记录完整上下文
         }
         return new_node
     
@@ -724,7 +737,7 @@ class MCTS_Reasoner:
             
         actual_rollout_num = max(1, actual_rollout_num)
         
-        test_out("dynamic_rollout", f"Depth: {current_depth}/{self.max_depth}, Ratio: {depth_ratio}, Rollouts: {actual_rollout_num}/{self.rollout_num}", self.case_idx, self.dataset_name)
+        #test_out("dynamic_rollout", f"Depth: {current_depth}/{self.max_depth}, Ratio: {depth_ratio}, Rollouts: {actual_rollout_num}/{self.rollout_num}", self.case_idx, self.dataset_name)
         #test_out("previous steps", new_node.full_context, self.case_idx, self.dataset_name)
         
         rollout_prompt = self.prompt_handler.get_rollout_prompt(new_node.full_context)
@@ -736,7 +749,7 @@ class MCTS_Reasoner:
             rollout_prompt, 
             stop_stage='rollout', 
             n=actual_rollout_num, 
-            max_tokens=1000, 
+            max_tokens=1024, 
             seed=None,
             confidence_tag=confidence_tag
         )
@@ -854,7 +867,6 @@ class MCTS_Reasoner:
             "value": 0.0,
             "is_final": True,
             "max_depth_reached": True,
-            "full_context": new_node.full_context
         }
         
         return [new_node]
@@ -900,12 +912,10 @@ class MCTS_Reasoner:
     def _pick_final_answer(self, root: ReasoningNode) -> List[str]:
         """
         从所有叶子节点中选择最佳答案路径
-        
-        Args:
-            root: MCTS树的根节点
-        Returns:
-            最佳推理路径
         """
+        # [新增] 初始化 leaf_nodes 日志容器
+        self.tree_log["leaf_nodes"] = {}
+
         # 0. 异常处理：如果没有叶子节点
         if not self.leaf_nodes:
             best_child = max(root.children, key=lambda c: c.visits)
@@ -950,22 +960,32 @@ class MCTS_Reasoner:
             leaf_value = leaf.value / leaf.visits if leaf.visits > 0 else 0
             
             # --- C. 计算置信度 (Confidence Score) ---
-            # 3. & 4. 提取当前节点的答案，并从字典中获取占比
             leaf_answer = self._extract_answer_from_response(leaf.response)
             confidence_prop = self._get_answer_likelihood(leaf_answer, answer_frequency, total_leaf_count)
-            
-            # 将占比 (0-1) 映射到评分 (0-10)
             confidence_score = confidence_prop * 10
             
-            # --- D. 计算加权总分 ---
-            enhanced_leaf_value = (leaf_value + confidence_score) / 2
-            weighted_value = self.balance_beta * path_mean_value + (1 - self.balance_beta) * enhanced_leaf_value
+            # 新逻辑: 直接使用三个权重进行加权求和
+            weighted_value = (
+                self.path_value_weight * path_mean_value + 
+                self.leaf_value_weight * leaf_value + 
+                self.leaf_confidence_weight * confidence_score
+            )
             
+            # [新增] 将该叶子节点的详细信息写入 tree_log
+            self.tree_log["leaf_nodes"][leaf.coordinates] = {
+                "extracted_answer": leaf_answer,
+                "path_mean_value": {"score": path_mean_value, "weight": self.path_value_weight},
+                "leaf_value": {"score": leaf_value, "weight": self.leaf_value_weight},
+                "confidence_score": {"score": confidence_score, "weight": self.leaf_confidence_weight},
+                "weighted_value": weighted_value,
+                "full_path": leaf.full_context  # 记录完整路径
+            }
+
             # 更新最佳节点
             if weighted_value > best_weighted_value:
                 best_weighted_value = weighted_value
                 best_leaf = leaf
-                # [日志] 仅在发现更好的节点时输出简要信息，避免刷屏
+                # [日志] 仅在发现更好的节点时输出简要信息
                 test_out("new_best_found", f"Leaf {leaf.coordinates} best so far (score: {weighted_value:.4f}, ans: '{leaf_answer}')", self.case_idx, self.dataset_name)
         
         # 构造返回值
@@ -1074,30 +1094,22 @@ class MCTS_Reasoner:
             return 0.0
         
         if len(solution_list)<2:
-            return 0.5
+            return 10 / self.rollout_num
 
-        # 1. 获取答案频率字典 (内部已调用 _extract_answer_from_response)
-        # 这一步统计了每种答案(answer)出现的次数
+        # 1. 获取答案频率字典
         answer_frequency = self._calculate_answer_frequency(solution_list)
-        
-        # 总样本数 (通常为列表长度，用于计算分母)
         total_count = len(solution_list)
-        
         total_likelihood_score = 0.0
         
-        # 2. 遍历每条 solution，计算其对应的 score 并累加
+        # 2. 计算
         for response in solution_list:
-            # 需要重新提取一次答案，以确定当前 response 对应哪个 answer
             answer = self._extract_answer_from_response(response)
-            
-            # 获取该答案的置信度 (占比)
-            # 如果 answer 为空字符串 (提取失败)，frequency.get 也是 0，likelihood 为 0.0
             likelihood = self._get_answer_likelihood(answer, answer_frequency, total_count)
-            
             total_likelihood_score += likelihood
             
-        # 3. 返回平均值
-        return total_likelihood_score / total_count
+        # 3. 返回平均值 [Mod] 乘以 10 映射到 0-10 分
+        avg_prob = total_likelihood_score / total_count
+        return avg_prob * 10.0
 
     async def _output_best_answer(self, best_solution: str) -> str:
         """
@@ -1147,12 +1159,17 @@ class MCTS_Reasoner:
                 "rollout_weight": self.rollout_weight,
                 "process_weight": self.process_weight,
                 "pairwise_weight": self.pairwise_weight,
+                "rollout_sc_weight": self.rollout_sc_weight, # <-- 新增
+                "rollout_confidence_weight": self.rollout_confidence_weight, # <-- 新增
                 "rollout_num": self.rollout_num,
                 "max_depth": self.max_depth,
                 "branch_factor": self.branch_factor,
                 "branch_factor_init": self.branch_factor_init,
-                "balance_beta": self.balance_beta,
+                "leaf_value_weight": self.leaf_value_weight, # <-- 新增
+                "path_value_weight": self.path_value_weight, # <-- 新增
+                "leaf_confidence_weight": self.leaf_confidence_weight, # <-- 新增
             },
+            "leaf_nodes": self.tree_log["leaf_nodes"], # <-- 新增
             "nodes": self.tree_log["nodes"],
             "rollouts": self.tree_log["rollouts"],
         }
@@ -1198,14 +1215,22 @@ async def main():
                        help="LLM运行模式: aihub(AiHubMix), transformer(Transformers), vllm(vLLM), debug(调试模式)")
     parser.add_argument("--max_depth", type=int, default=10,
                        help="Maximum depth of the MCTS tree")
-    parser.add_argument("--balance_beta", type=float, default=0.65,
-                       help="过程奖励和rollout奖励的加权系数 (0-1)")
+    parser.add_argument("--leaf_value_weight", type=float, default=0.25,
+                        help="Weight for the value of the leaf node itself")
+    parser.add_argument("--path_value_weight", type=float, default=0.5,
+                        help="Weight for the mean value of the reasoning path")
+    parser.add_argument("--leaf_confidence_weight", type=float, default=0.25,
+                        help="Weight for the confidence score based on answer frequency")
     parser.add_argument("--pairwise_weight", type=float, default=0.5,
                        help="对比奖励信号的权重")
     parser.add_argument("--process_weight", type=float, default=0.2,
                        help="过程评估信号的权重")
     parser.add_argument("--rollout_weight", type=float, default=0.3,
                        help="rollout模拟评估信号的权重")
+    parser.add_argument("--rollout_sc_weight", type=float, default=0.0,
+                        help="Weight for self-consistency score in rollout")
+    parser.add_argument("--rollout_confidence_weight", type=float, default=0.0,
+                        help="Weight for confidence score in rollout")
     args = parser.parse_args()
     
     # 设置全局args引用
@@ -1225,10 +1250,14 @@ async def main():
         "rollout_num": args.rollout_num,
         "run_mode": args.run_mode,
         "max_depth": args.max_depth,
-        "balance_beta": args.balance_beta,
+        "leaf_value_weight": args.leaf_value_weight, # <-- 新增
+        "path_value_weight": args.path_value_weight, # <-- 新增
+        "leaf_confidence_weight": args.leaf_confidence_weight, # <-- 新增
         "pairwise_weight": args.pairwise_weight,
         "process_weight": args.process_weight,
         "rollout_weight": args.rollout_weight,
+        "rollout_sc_weight": args.rollout_sc_weight, # <-- 新增
+        "rollout_confidence_weight": args.rollout_confidence_weight, # <-- 新增
     }
     
     # 统计模型加载时间
@@ -1302,10 +1331,14 @@ async def main():
             "verbose": args.verbose,
             "run_mode": args.run_mode,
             "max_depth": args.max_depth,
-            "balance_beta": args.balance_beta,
+            "leaf_value_weight": args.leaf_value_weight, # <-- 新增
+            "path_value_weight": args.path_value_weight, # <-- 新增
+            "leaf_confidence_weight": args.leaf_confidence_weight, # <-- 新增
             "pairwise_weight": args.pairwise_weight,
             "process_weight": args.process_weight,
-            "rollout_weight": args.rollout_weight
+            "rollout_weight": args.rollout_weight,
+            "rollout_sc_weight": args.rollout_sc_weight, # <-- 新增
+            "rollout_confidence_weight": args.rollout_confidence_weight, # <-- 新增
         }
         
         # 构建超参数输出字符串
@@ -1341,10 +1374,14 @@ async def main():
             max_depth=args.max_depth,
             branch_factor=args.branch_factor,   
             branch_factor_init=args.branch_factor_init,
-            balance_beta=args.balance_beta,
+            leaf_value_weight=args.leaf_value_weight, # <-- 新增
+            path_value_weight=args.path_value_weight, # <-- 新增
+            leaf_confidence_weight=args.leaf_confidence_weight, # <-- 新增
             pairwise_weight=args.pairwise_weight,
             process_weight=args.process_weight,
-            rollout_weight=args.rollout_weight
+            rollout_weight=args.rollout_weight,
+            rollout_sc_weight=args.rollout_sc_weight, # <-- 新增
+            rollout_confidence_weight=args.rollout_confidence_weight, # <-- 新增
         )
         
         try:

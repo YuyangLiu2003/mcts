@@ -340,21 +340,6 @@ class use_async_vLLM:
             except Exception as e:
                 print(f"Warning: Failed to destroy process group: {e}")
 
-    # async def generate(self, prompt, max_tokens=1024, n=1, temperature=0.7, 
-    #                    stop_stage=None, skip_special_tokens=True):
-    #     """
-    #     单条轨迹生成（兼容旧接口）
-    #     """
-    #     texts = await self.batch_generate(
-    #         prompt=prompt,
-    #         max_tokens=max_tokens,
-    #         n=1,
-    #         temperature=temperature,
-    #         stop_stage=stop_stage,
-    #         skip_special_tokens=skip_special_tokens
-    #     )
-    #     return texts[0] if texts else ""
-
     async def generate(self, prompt, confidence_tag=False, stop_stage=None, **kwargs):
         # 设置默认参数
         defaults = {

@@ -96,7 +96,7 @@ class PromptHandler:
         if model_name and (model_name in self.thinking_attr_dict.keys()):
             attr_name = self.thinking_attr_dict[model_name]
             self.thinking_attr_name = attr_name
-            print(f"模型 {model_name} 支持thinking模式，属性名为: {attr_name}")
+            print(f"模型 {model_name} 支持thinking模式，思考模式: {thinking_mode}")
         elif model_name:
             pass
             #print(f"模型 {model_name} 不在thinking_attr_dict中，将不会添加thinking参数")

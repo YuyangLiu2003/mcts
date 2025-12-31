@@ -3,8 +3,8 @@
 PROJECT_DIR="/data/wuyang/MCTS_Reasoning"
 # 设置变量
 # 这里只需要修改LOG_DIR中的文件地址和DATASET_PATH中的文件地址即可，其余不需要修改
-LOG_DIR="${PROJECT_DIR}/logs/GPQA-Diamond_20251224_133033_1_200"
-DATASET_PATH="${PROJECT_DIR}/datasets/GPQA-Diamond.json"
+LOG_DIR="${PROJECT_DIR}/logs/aime2024_20251226_124857_1_40"
+DATASET_PATH="${PROJECT_DIR}/datasets/aime2024.json"
 # LOG_DIR="/root/autodl-tmp/MCTS_Async/logs/combined_dataset_20251010_082349_0_69"
 # DATASET_PATH="datasets/combined_dataset.json"
 RESULTS_DIR="${PROJECT_DIR}/results"
